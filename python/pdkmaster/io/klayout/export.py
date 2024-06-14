@@ -428,14 +428,14 @@ class FileExporter:
         global _mask_conv
         _mask_conv = _MaskConverter(tech=tech)
 
-    def __call__(self):
+    def __call__(self, *, layerprops: Optional[str]=None):
         return {
             "drc": self._s_drc(),
             "ly_drc": self._ly_drc(),
             "extract": self._s_extract(),
             "ly_extract": self._ly_extract(),
             "lvs": self._s_lvs(),
-            "ly_tech": self._ly_tech(),
+            "ly_tech": self._ly_tech(layerprops=layerprops),
         }
 
     def _s_drc(self):
@@ -662,7 +662,7 @@ class FileExporter:
 
         return s
 
-    def _ly_tech(self):
+    def _ly_tech(self, *, layerprops: Optional[str]):
         lyt = ET.Element("technology")
         ET.SubElement(lyt, "name").text = self.export_name
         ET.SubElement(lyt, "description").text = (
@@ -670,7 +670,9 @@ class FileExporter:
         )
         ET.SubElement(lyt, "group")
         ET.SubElement(lyt, "dbu").text = f"{self.tech.dbu}"
-        ET.SubElement(lyt, "layer-properties_file")
+        se = ET.SubElement(lyt, "layer-properties_file")
+        if layerprops is not None:
+            se.text = layerprops
         ET.SubElement(lyt, "add-other-layers").text = "true"
         ropts = ET.SubElement(lyt, "reader-options")
         roptscom = ET.SubElement(ropts, "common")
