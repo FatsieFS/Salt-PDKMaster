@@ -24,13 +24,10 @@ from .typing import CornerSpec
 from .spice_ import SpicePrimsParamSpec
 from ...technology import primitive as _prm
 from ...design import circuit as _ckt
+from ._util import _sanitize_name
 
 
 __all__ = ["PySpiceFactory"]
-
-
-def _sanitize_name(name):
-    return name.replace("(", "[").replace(")", "]")
 
 
 class _SubCircuit(SubCircuit):
@@ -197,10 +194,6 @@ class _SubCircuit(SubCircuit):
                             **model_args,
                         )
             elif isinstance(inst, _ckt._CellInstance):
-                pin_args = tuple()
-                for port in inst.ports:
-                    net = netlookup[port]
-                    pin_args += (net.name,)
                 pin_args = tuple(
                     _sanitize_name(netlookup[port].name) for port in inst.ports
                 )
@@ -286,7 +279,7 @@ class PySpiceFactory:
         libfile: the full path to the SPICE lib file to include in the generated SPICE
             objects
         corners: A list of valid corners for this lib file.
-        conflicts: For a given corner it gives the conrers with which it conflicts,
+        conflicts: For a given corner it gives the corners with which it conflicts,
             e.g. if you have:
 
                 ``"typ": ("ff", "ss"),``

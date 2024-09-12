@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later OR GPL-2.0-or-later OR CERN-OHL-S-2.0+ OR Apache-2.0
-from typing import Iterable, Optional
+from typing import Iterable
 
-from ..typing import MultiT, cast_MultiT
 from . import property_ as _prp, net as _net, mask as _msk
 
 
@@ -30,8 +29,8 @@ class _Wafer(_msk._Mask):
         self.grid: _prp.PropertyT = _msk._MaskProperty(mask=self, name="grid")
 
     @property
-    def designmasks(self) -> Iterable[_msk.DesignMask]:
-        return tuple()
+    def submasks(self) -> Iterable[_msk.MaskT]:
+        return (self,)
 
     def __eq__(self, other: object) -> bool:
         # We only allow one _Wafer object so they are equal if other is also
@@ -40,7 +39,10 @@ class _Wafer(_msk._Mask):
 
     def __hash__(self) -> int:
         return super().__hash__()
-wafer = _Wafer()
+# Provide private variable with full type for internal use and a generic
+# global for external which is just a mask
+_wafer_base = _Wafer()
+wafer: _msk.MaskT = _wafer_base.alias("_wafer")
 
 
 class SubstrateNet(_net._Net):

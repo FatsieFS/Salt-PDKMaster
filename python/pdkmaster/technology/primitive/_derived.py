@@ -1,17 +1,17 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later OR GPL-2.0-or-later OR CERN-OHL-S-2.0+ OR Apache-2.0
-from typing import Optional, Tuple, Iterable
+from typing import Tuple, Iterable, Union, Optional
 
 from pdkmaster.technology import mask as _msk
 
-from ...typing import cast_MultiT
+from ...typing import MultiT, cast_MultiT
 from .. import rule as _rle, mask as _msk, technology_ as _tch
 
-from ._core import _MaskPrimitive
+from ._core import _MaskPrimitive, DesignMaskPrimitiveT
 
 
 # _DerivedPrimitive and subclasses are considered for internal use only;
 # not to be used in user land code. User land just sees MaskPrimitiveT
-__all__ = []
+__all__ = ["InsidePrimitiveT"]
 
 
 class _DerivedPrimitive(_MaskPrimitive):
@@ -28,14 +28,56 @@ class _DerivedPrimitive(_MaskPrimitive):
 class _Intersect(_DerivedPrimitive):
     """A derived primitive representing the overlap of a list of primitives
     """
-    def __init__(self, *, prims: Iterable[_MaskPrimitive]):
+    def __init__(self, *, name: Optional[str]=None, prims: Iterable[_MaskPrimitive]):
         prims2: Tuple[_MaskPrimitive, ...] = cast_MultiT(prims)
         if len(prims2) < 2:
             raise ValueError(f"At least two prims needed for '{self.__class__.__name__}'")
         self.prims = prims2
 
         mask = _msk.Intersect(p.mask for p in prims2)
-        super().__init__(mask=mask)
+        super().__init__(name=name, mask=mask)
+
+    def __hash__(self):
+        return hash(self.prims)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _Intersect):
+            return False
+        else:
+            return set(self.prims) == set(other.prims)
+
+
+class _InsidePrimitive(_Intersect):
+    """A derived primitive that represents a main primitive inside other primitives.
+    A separate class super to _Intersect is here to keep track of the main primitive
+    which is inside other primitive.
+    One of the intended use cases is for min_width/min_space computation for a
+    certain primitive (like WaferFire) inside certain context, e.g. implant etc.
+    """
+    def __init__(self, *,
+        name: Optional[str]=None,
+        prim: DesignMaskPrimitiveT,
+        in_: MultiT[Union[DesignMaskPrimitiveT, "InsidePrimitiveT"]],
+    ):
+        self.prim = prim
+        self.in_ = in_ = cast_MultiT(in_)
+        if name is None:
+            s_in = (
+                in_[0].name if len(in_) == 1
+                else f"({','.join(p.name for p in in_)})"
+            )
+            name = f"inside({prim.name},{s_in})"
+        super().__init__(name=name, prims=(prim, *self.in_))
+
+    def __hash__(self):
+        return super().__hash__()
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _InsidePrimitive):
+            return False
+        else:
+            return (self.prim == other.prim) and (set(self.in_) == set(other.in_))
+InsidePrimitiveT = _InsidePrimitive
 
 
 class _Alias(_DerivedPrimitive):

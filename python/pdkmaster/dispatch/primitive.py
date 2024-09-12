@@ -2,7 +2,6 @@
 from typing import Callable, Optional
 
 from ..technology import primitive as _prm
-from ..technology.primitive.conductors import _WaferWireIntersect, _ViaIntersect
 
 
 class PrimitiveDispatcher:
@@ -76,6 +75,14 @@ class PrimitiveDispatcher:
         """
         return self._DerivedPrimitive(prim, *args, **kwargs)
 
+    def _InsidePrimitive(self, prim: _prm._derived._InsidePrimitive, *args, **kwargs):
+        """
+        API Notes:
+            * No backwards compatiblity is provided for overloading this function
+              in user land code. _Intersect is considered for internal use only.
+        """
+        return self._Intersect(prim=prim, *args, **kwargs)
+
     def _Outside(self, prim: _prm._derived._Outside, * args, **kwargs):
         """
         API Notes:
@@ -138,9 +145,6 @@ class PrimitiveDispatcher:
     def WaferWire(self, prim: _prm.WaferWire, *args, **kwargs):
         return self._WidthSpaceConductor(prim, *args, **kwargs)
 
-    def _WaferWireIntersect(self, prim: _WaferWireIntersect, *args, **kwargs):
-        return self._Intersect(prim, *args, **kwargs)
-
     def GateWire(self, prim: _prm.GateWire, *args, **kwargs):
         return self._WidthSpaceConductor(prim, *args, **kwargs)
 
@@ -155,9 +159,6 @@ class PrimitiveDispatcher:
 
     def Via(self, prim: _prm.Via, *args, **kwargs):
         return self._Conductor(prim, *args, **kwargs)
-
-    def _ViaIntersect(self, prim: _ViaIntersect, *args, **kwargs):
-        return self._Intersect(prim, *args, **kwargs)
 
     def PadOpening(self, prim: _prm.PadOpening, *args, **kwargs):
         return self._WidthSpaceConductor(prim, *args, **kwargs)

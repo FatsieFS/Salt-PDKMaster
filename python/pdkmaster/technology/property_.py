@@ -39,7 +39,7 @@ class Enclosure:
         if isinstance(spec, float):
             self._spec = (spec, spec)
         else:
-            self._spec = tuple(spec)
+            self._spec = tuple(spec) # type: ignore
             if len(self.spec) != 2:
                 raise ValueError(
                     f"spec for Enclosure is either a float or 2 floats"
@@ -221,7 +221,7 @@ class _Comparison(_rle._Condition):
         self._elements: Tuple[_Property, Any]
 
     @property
-    def left(self) -> _Property:
+    def left(self) -> PropertyT:
         return self._elements[0]
     @property
     def right(self) -> Any:

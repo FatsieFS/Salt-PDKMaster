@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later OR GPL-2.0-or-later OR CERN-OHL-S-2.0+ OR Apache-2.0
 import abc
 from itertools import combinations, chain
-from typing import Tuple, Dict, Set, Union, Iterable, Optional, cast
+from typing import Tuple, Dict, Set, Union, Iterable, Optional
 
 from ...typing import (
     MultiT, cast_MultiT, cast_MultiT_n,
@@ -11,13 +11,13 @@ from .. import (
     property_ as _prp, rule as _rle, mask as _msk, edge as _edg, technology_ as _tch,
 )
 
-from . import MaskPrimitiveT
+from . import MaskPrimitiveT, DesignMaskPrimitiveT
 from ._core import (
     _Primitive, _PrimitiveNet, _DesignMaskPrimitive, _WidthSpaceDesignMaskPrimitive,
     UnconnectedPrimitiveError,
 )
-from ._derived import _Intersect
-from .layers import Marker, Insulator, Implant
+from ._derived import _InsidePrimitive, InsidePrimitiveT
+from .layers import Marker, Insulator, Implant, nImpl, pImpl, nBase, pBase
 
 
 __all__ = [
@@ -218,6 +218,9 @@ class WaferWire(_WidthSpaceConductor):
             the well. If only one value is given it is valid for all the wells.
         min_well_enclosure_same_type: allow to specify other enclosure for
             WaferWires with the same type as the well.
+        min_well_enclosure4oxide: allow to specify well enclosure for WaferWire
+            inside an oxide. Typically used when the active-well enclosure is
+            bigger for thick gate oxide devices than for regular devices.
         min_substrate_enclosure: the minimum required enclosure of the WaferWire by
             the substrate with the substrate defined as any wafer region that is
             not covered by a well. If not specified the same value as
@@ -225,6 +228,9 @@ class WaferWire(_WidthSpaceConductor):
         min_substrate_enclosure_same_type: allow to specify other enclosure for
             WaferWires with the same type as the well. If not specified the same value
             as min_well_enclosure_same_type is used.
+        min_well_enclosure4oxide: allow to specify substrate enclosure for WaferWire
+            inside an oxide. Typically used when the active-well enclosure is
+            bigger for thick gate oxide devices than for regular devices.
         allow_well_crossing: wether it is allow for a WaferWire to go over a well
             boundary
         oxide: the list of valid oxide layers for this WaferWire. This can be empty.
@@ -242,8 +248,10 @@ class WaferWire(_WidthSpaceConductor):
         well: MultiT[Well],
         min_well_enclosure: MultiT[_prp.Enclosure],
         min_well_enclosure_same_type: OptMultiT[Optional[_prp.Enclosure]]=None,
+        min_well_enclosure4oxide: Dict[Insulator, MultiT[_prp.Enclosure]]={},
         min_substrate_enclosure: Optional[_prp.Enclosure]=None,
         min_substrate_enclosure_same_type: Optional[_prp.Enclosure]=None,
+        min_substrate_enclosure4oxide: Dict[Insulator, _prp.Enclosure]={},
         allow_well_crossing: bool,
         oxide: MultiT[Insulator]=(),
         min_oxide_enclosure: MultiT[Optional[_prp.Enclosure]]=None,
@@ -284,6 +292,10 @@ class WaferWire(_WidthSpaceConductor):
         self.min_well_enclosure_same_type = cast_OptMultiT_n(
             min_well_enclosure_same_type, n=len(well),
         )
+        self.min_well_enclosure4oxide = {
+            ox: cast_MultiT_n(enc, n=len(well))
+            for ox, enc in min_well_enclosure4oxide.items()
+        }
         if allow_in_substrate:
             if min_substrate_enclosure is None:
                 if len(min_well_enclosure) == 1:
@@ -309,6 +321,7 @@ class WaferWire(_WidthSpaceConductor):
         self.allow_well_crossing = allow_well_crossing
         self.min_substrate_enclosure = min_substrate_enclosure
         self.min_substrate_enclosure_same_type = min_substrate_enclosure_same_type
+        self.min_substrate_enclosure4oxide = min_substrate_enclosure4oxide
 
         oxide = cast_MultiT(oxide)
         if (len(oxide) == 0) and (min_oxide_enclosure is None):
@@ -316,6 +329,17 @@ class WaferWire(_WidthSpaceConductor):
         min_oxide_enclosure = cast_MultiT_n(min_oxide_enclosure, n=len(oxide))
         self.oxide = oxide
         self.min_oxide_enclosure = min_oxide_enclosure
+
+        for ox in min_well_enclosure4oxide.keys():
+            if ox not in oxide:
+                raise ValueError(
+                    f"Min. well enclosure specified for invalid oxide '{ox.name}'",
+                )
+        for ox in min_substrate_enclosure4oxide.keys():
+            if ox not in oxide:
+                raise ValueError(
+                    f"Min. substr. enclosure specified for invalid oxide '{ox.name}'",
+                )
 
         super().__init__(**super_args)
 
@@ -343,6 +367,41 @@ class WaferWire(_WidthSpaceConductor):
             for w in self.well:
                 if impl.type_ == w.type_:
                     yield _msk.Connect(sd_mask_impl, w.mask)
+        # Connect well/bulk if implant of n or p type is missing
+        nimpls = tuple(filter(lambda impl: impl.type_ == nImpl, self.implant))
+        pimpls = tuple(filter(lambda impl: impl.type_ == pImpl, self.implant))
+        if not nimpls:
+            if pimpls:
+                bare_mask = self.conn_mask.remove(
+                    impl.mask for impl in pimpls
+                ).alias(
+                    f"{self.conn_mask.name}:bare"
+                )
+                yield bare_mask
+                yield _msk.Connect(self.conn_mask, bare_mask)
+                if (
+                    self.allow_in_substrate
+                    and tech.base.type_ == nBase
+                ):
+                    yield _msk.Connect(bare_mask, substrate_mask)
+                for w in filter(lambda w2: w2.type_ == nImpl, self.well):
+                    yield _msk.Connect(bare_mask, w.mask)
+        if not pimpls:
+            if nimpls:
+                bare_mask = self.conn_mask.remove(
+                    impl.mask for impl in nimpls
+                ).alias(
+                    f"{self.conn_mask.name}:bare"
+                )
+                yield bare_mask
+                yield _msk.Connect(self.conn_mask, bare_mask)
+                if (
+                    self.allow_in_substrate
+                    and tech.base.type_ == pBase
+                ):
+                    yield _msk.Connect(bare_mask, substrate_mask)
+                for w in filter(lambda w2: w2.type_ == pImpl, self.well):
+                    yield _msk.Connect(bare_mask, w.mask)
         for implduo in combinations((impl.mask for impl in self.implant_abut), 2):
             yield _msk.Intersect(implduo).area == 0
         # TODO: allow_contactless_implant
@@ -367,7 +426,7 @@ class WaferWire(_WidthSpaceConductor):
                             f"by well '{w.name}",
                         )
                     for ww in (
-                        cast("_WaferWireIntersect", self.in_(impl))
+                        self.in_(impl)
                         for impl in filter(
                             # other type
                             lambda impl2: w.type_ != impl2.type_, self.implant,
@@ -375,13 +434,16 @@ class WaferWire(_WidthSpaceConductor):
                     ):
                         yield ww.mask.enclosed_by(w.mask) >= enc
                     for ww in (
-                        cast("_WaferWireIntersect", self.in_(impl))
+                        self.in_(impl)
                         for impl in filter(
                             # same type
                             lambda impl2: w.type_ == impl2.type_, self.implant,
                         )
                     ):
                         yield ww.mask.enclosed_by(w.mask) >= enc2
+
+            for ox, encs in self.min_well_enclosure4oxide.items():
+                yield self.in_(ox).mask.enclosed_by(w.mask) >= encs[i]
 
         if self.min_substrate_enclosure is not None:
             if self.min_substrate_enclosure_same_type is None:
@@ -391,7 +453,7 @@ class WaferWire(_WidthSpaceConductor):
                 )
             else:
                 for ww in (
-                    cast("_WaferWireIntersect", self.in_(impl)) for impl in filter(
+                    self.in_(impl) for impl in filter(
                     # other type
                     lambda impl2: tech.base.type_.value != impl2.type_.value,
                     self.implant,
@@ -401,7 +463,7 @@ class WaferWire(_WidthSpaceConductor):
                         >= self.min_substrate_enclosure
                     )
                 for ww in (
-                    cast("_WaferWireIntersect", self.in_(impl)) for impl in filter(
+                    self.in_(impl) for impl in filter(
                     # same type
                     lambda impl2: tech.base.type_.value == impl2.type_.value,
                     self.implant,
@@ -410,6 +472,11 @@ class WaferWire(_WidthSpaceConductor):
                         ww.mask.enclosed_by(substrate_mask)
                         >= self.min_substrate_enclosure_same_type
                     )
+
+        for ox, enc in self.min_substrate_enclosure4oxide.items():
+            yield (
+                self.in_(ox).mask.enclosed_by(substrate_mask) >= enc
+            )
 
         for i, ox in enumerate(self.oxide):
             enc = self.min_oxide_enclosure[i]
@@ -423,30 +490,22 @@ class WaferWire(_WidthSpaceConductor):
                 for w in self.well
             )
 
-    def in_(self, prim: MultiT[MaskPrimitiveT]) -> MaskPrimitiveT:
-        return _WaferWireIntersect(waferwire=self, prim=prim)
-
-
-class _WaferWireIntersect(_Intersect):
-    """Intersect of WaferWire with one or more of it's implants, wells and
-    oxides"""
-    def __init__(self, *,
-        waferwire: WaferWire, prim: MultiT[MaskPrimitiveT],
-    ):
-        ww_prims: Set[MaskPrimitiveT] = set(waferwire.implant)
-        ww_prims.update(waferwire.well)
-        ww_prims.update(waferwire.oxide)
+    def in_(self, prim: MultiT[DesignMaskPrimitiveT]) -> InsidePrimitiveT:
         prim = cast_MultiT(prim)
-        for p in prim:
-            if p not in ww_prims:
-                raise ValueError(
-                    f"prim '{p.name}' not an implant, well or oxide layer for"
-                    f" WaferWire '{waferwire.name}'"
-                )
-        self.waferwire = waferwire
-        self.prim = prim
+        valid = (
+            *self.well, *self.implant, *self.oxide,
+        )
+        invalid = tuple(filter(
+            lambda p: (not isinstance(p, Marker)) and (p not in valid),
+            prim
+        ))
+        if invalid:
+            s = ", ".join(f"'{p.name}'" for p in invalid)
+            raise ValueError(
+                f"Primitive(s) {s} not valid for WaferWire '{self.name}'"
+            )
 
-        super().__init__(prims=(waferwire, *prim))
+        return _InsidePrimitive(prim=self, in_=prim)
 
 
 class GateWire(_WidthSpaceConductor):
@@ -458,6 +517,9 @@ class GateWire(_WidthSpaceConductor):
     """
     def __init__(self, **super_args):
         super().__init__(**super_args)
+
+    def in_(self, prim: MultiT[Union[Implant, Insulator, Marker]]) -> InsidePrimitiveT:
+        return _InsidePrimitive(prim=self, in_=prim)
 
 
 class MetalWire(_WidthSpaceConductor):
@@ -552,34 +614,23 @@ class Via(_Conductor):
             yield self.mask.enclosed_by(top_mask) >= enc
 
     @property
-    def designmasks(self):
-        yield from super().designmasks
+    def submasks(self) -> Iterable[_msk.MaskT]:
+        yield from super().submasks
         for conn in self.bottom + self.top:
-            yield from conn.designmasks
+            yield from conn.submasks
 
-    def in_(self, prim: MultiT[MaskPrimitiveT]) -> MaskPrimitiveT:
-        return _ViaIntersect(via=self, prim=prim)
-
-
-class _ViaIntersect(_Intersect):
-    """Intersect of WaferWire with one or more of it's implants, wells and
-    oxides"""
-    def __init__(self, *,
-        via: Via, prim: MultiT[MaskPrimitiveT],
-    ):
-        via_prims: Set[MaskPrimitiveT] = {*via.bottom, *via.top}
+    def in_(self, prim: MultiT[DesignMaskPrimitiveT]) -> InsidePrimitiveT:
+        via_prims: Set[MaskPrimitiveT] = {*self.bottom, *self.top}
         prim = cast_MultiT(prim)
         for p in prim:
-            if isinstance(p, _WaferWireIntersect):
-                p = p.waferwire
+            if isinstance(p, InsidePrimitiveT):
+                p = p.prim
             if p not in via_prims:
                 raise ValueError(
-                    f"prim '{p.name}' not a bottom or top layer for Via '{via.name}'"
+                    f"prim '{p.name}' not a bottom or top layer for Via '{self.name}'"
                 )
-        self.via = via
-        self.prin = prim
 
-        super().__init__(prims=(via, *prim))
+        return _InsidePrimitive(prim=self, in_=prim)
 
 
 class PadOpening(_WidthSpaceConductor):
@@ -619,9 +670,9 @@ class PadOpening(_WidthSpaceConductor):
         )
 
     @property
-    def designmasks(self):
-        yield from super().designmasks
-        yield from self.bottom.designmasks
+    def submasks(self) -> Iterable[_msk.MaskT]:
+        yield from super().submasks
+        yield from self.bottom.submasks
 
 
 # Import at end to avoid circular import problems

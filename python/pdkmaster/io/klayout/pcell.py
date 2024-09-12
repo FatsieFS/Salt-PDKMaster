@@ -176,7 +176,6 @@ class _MOSFETFingers(pya.PCellDeclarationHelper):
         )
 
 
-
 class _ViaArray(pya.PCellDeclarationHelper):
     def __init__(self, *,
         layoutfab: _lay.LayoutFactory, gds_layers: _typ.GDSLayerSpecDict,
@@ -511,6 +510,51 @@ class _ViaArray(pya.PCellDeclarationHelper):
             merge=True,
         )
 
+
+class _Resistor(pya.PCellDeclarationHelper):
+    def __init__(self, *,
+        layoutfab: _lay.LayoutFactory, gds_layers: _typ.GDSLayerSpecDict,
+        res: _prm.Resistor,
+    ):
+        self._layoutfab = layoutfab
+        self._gds_layers = gds_layers
+        self._res = res
+        super().__init__()
+
+        self.param("_w",  _TypeDouble, "Width", unit="µm", default=res.min_width)
+        self._w: float
+        self.param("_l",  _TypeDouble, "Length", unit="µm", default=res.min_length)
+        self._l: float
+
+    def display_text_impl(self):
+        # Provide a descriptive text for the cell
+        return f"{self._res.name}(w={self._w:1.3f}, l={self._l:1.3f})"
+
+    def coerce_parameters_impl(self):
+        res = self._res
+        l = self._l
+        w = self._w
+
+        min_l = res.min_length
+        if l < (min_l - _geo.epsilon):
+            self._l = min_l
+
+        min_w = res.min_width
+        if w < (min_w - _geo.epsilon):
+            self._w = min_w
+
+    def produce_impl(self):
+        res = self._res
+
+        lay = self._layoutfab.layout_primitive(res, length=self._l, width=self._w)
+
+        export2db(lay,
+            gds_layers=self._gds_layers,
+            pya_cell=self.cell,
+            merge=True,
+        )
+
+
 class _PCellGenerator(PrimitiveDispatcher):
     def __init__(self, *, pya_lib: "PCellLibrary"):
         self._pya_lib = pya_lib
@@ -615,6 +659,13 @@ class _PCellGenerator(PrimitiveDispatcher):
             via=prim,
         )
         self.register(h, name=f"{prim.name}$array")
+
+    def Resistor(self, prim: _prm.Resistor):
+        layoutfab = self._pya_lib._layoutfab
+        gds_layers = self._pya_lib._gds_layers
+
+        h = _Resistor(layoutfab=layoutfab, gds_layers=gds_layers, res=prim)
+        self.register(h, name=prim.name)
 
     def MOSFET(self, prim: _prm.MOSFET) -> None:
         layoutfab = self._pya_lib._layoutfab

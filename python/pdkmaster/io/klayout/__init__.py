@@ -2,3 +2,8 @@
 from .export import *
 from .merge_ import *
 from .pcell import *
+try:
+    # Support environment without doit dependency installed
+    from .doit import *
+except: # pragma: no cover
+    pass

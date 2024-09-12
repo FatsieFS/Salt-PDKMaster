@@ -2,7 +2,7 @@
 # This file was named ruleprims.py as rule.py seemed to be able to confuse pylance
 # from vscode.
 from itertools import product
-from typing import Iterable
+from typing import Iterable, overload
 
 from ...typing import MultiT, cast_MultiT, OptMultiT, cast_OptMultiT
 from .. import (
@@ -52,9 +52,9 @@ class MinWidth(_RulePrimitive):
         yield self.prim.mask.width >= self.min_width
 
     @property
-    def designmasks(self):
-        yield from super().designmasks
-        yield from self.prim.designmasks
+    def submasks(self) -> Iterable[_msk.MaskT]:
+        yield from super().submasks
+        yield from self.prim.submasks
 
 
 class Spacing(_RulePrimitive):
@@ -73,11 +73,25 @@ class Spacing(_RulePrimitive):
             each shape on a layer in primitives1 to each shape on a layer
             in primitives2.
         min_space: the minimum space specifcation
+        allow_abut: wether a 0.0 spacing is allowed. Default to False.
     """
+    @overload
+    def __init__(self, *,
+        primitives1: MultiT[_MaskPrimitive],
+        min_space: float,
+    ): ... # pragma: no cover
+    @overload
+    def __init__(self, *,
+        primitives1: MultiT[_MaskPrimitive],
+        primitives2: MultiT[_MaskPrimitive],
+        min_space: float,
+        allow_abut: bool=False,
+    ): ... # pragma: no cover
     def __init__(self, *,
         primitives1: MultiT[_MaskPrimitive],
         primitives2: OptMultiT[_MaskPrimitive]=None,
         min_space: float,
+        allow_abut: bool=False,
     ):
         primitives1 = cast_MultiT(primitives1)
         primitives2 = cast_OptMultiT(primitives2)
@@ -102,6 +116,7 @@ class Spacing(_RulePrimitive):
         self.primitives1 = primitives1
         self.primitives2 = primitives2
         self.min_space = min_space
+        self.allow_abut = allow_abut
 
     def _generate_rules(self, *,
         tech: _tch.Technology,
@@ -113,19 +128,22 @@ class Spacing(_RulePrimitive):
             yield joined.space >= self.min_space
         else:
             yield from (
-                _msk.Spacing(prim1.mask, prim2.mask) >= self.min_space
+                (
+                    _msk.Spacing(prim1.mask, prim2.mask, without_zero=self.allow_abut)
+                    >= self.min_space
+                )
                 for prim1, prim2 in product(self.primitives1, self.primitives2)
             )
 
     @property
-    def designmasks(self):
-        yield from super().designmasks
+    def submasks(self) -> Iterable[_msk.MaskT]:
+        yield from super().submasks
         if self.primitives2 is not None:
             for prim in (*self.primitives1, *self.primitives2):
-                yield from prim.designmasks
+                yield from prim.submasks
         else:
             for prim in self.primitives1:
-                yield from prim.designmasks
+                yield from prim.submasks
 
     def __repr__(self):
         return self.name
@@ -159,10 +177,10 @@ class Enclosure(_RulePrimitive):
         yield self.prim.mask.enclosed_by(self.by.mask) >= self.min_enclosure
 
     @property
-    def designmasks(self) -> Iterable[_msk.DesignMask]:
-        yield from super().designmasks
-        yield from self.prim.designmasks
-        yield from self.by.designmasks
+    def submasks(self) -> Iterable[_msk.MaskT]:
+        yield from super().submasks
+        yield from self.prim.submasks
+        yield from self.by.submasks
 
     def __repr__(self) -> str:
         return self.name
@@ -193,10 +211,10 @@ class NoOverlap(_RulePrimitive):
         yield intersect.mask.area == 0.0
 
     @property
-    def designmasks(self) -> Iterable[_msk.DesignMask]:
-        yield from super().designmasks
-        yield from self.prim1.designmasks
-        yield from self.prim2.designmasks
+    def submasks(self) -> Iterable[_msk.MaskT]:
+        yield from super().submasks
+        yield from self.prim1.submasks
+        yield from self.prim2.submasks
 
     def __repr__(self) -> str:
         return self.name

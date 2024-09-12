@@ -21,7 +21,7 @@ class MOSFETInstSpec: # pragma: no cover
 
     Arguments:
         inst: the transistor instance to generate layout for in the string.
-            A ValueError will be raised in the it is not a MOSFET instance.
+            A ValueError will be raised if it is not a MOSFET instance.
             The inst parameters like l, w, etc with determine the layout of the transistor.
         contact_left, contact_right: whether to place contacts left or right from the
             transistor. This value needs to be the same between two neighbours.

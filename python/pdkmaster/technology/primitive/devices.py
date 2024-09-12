@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later OR GPL-2.0-or-later OR CERN-OHL-S-2.0+ OR Apache-2.0
 from enum import Enum
-from typing import List, Tuple, Dict, Iterable, Union, Optional, Any, cast
+from typing import List, Dict, Iterable, Union, Optional, Any, cast
 from warnings import warn
 
 from ... import _util
@@ -439,13 +439,13 @@ class Diode(_DevicePrimitive, _MaskPrimitive):
         )
 
     @property
-    def designmasks(self) -> Iterable[_msk.DesignMask]:
-        yield from self.wire.designmasks
+    def submasks(self) -> Iterable[_msk.MaskT]:
+        yield from self.wire.submasks
         for impl in self.implant:
-            yield from impl.designmasks
+            yield from impl.submasks
         if self.well is not None:
-            yield from self.well.designmasks
-        yield from super().designmasks
+            yield from self.well.submasks
+        yield from super().submasks
 
     def _generate_rules(self, *,
         tech: _tch.Technology,
@@ -750,7 +750,8 @@ class MOSFETGate(_WidthSpacePrimitive):
         if self.min_contactgate_space is not None:
             assert self.contact is not None
             rules.append(
-                _msk.Spacing(mask, self.contact.mask) >= self.min_contactgate_space,
+                _msk.Spacing(mask, self.contact.mask, without_zero=False)
+                >= self.min_contactgate_space,
             )
             mask_used = True
 
@@ -869,6 +870,38 @@ class MOSFET(_DevicePrimitive):
         def min_contactgate_space(self) -> float:
             return cast(float, self._lookup("min_contactgate_space", False))
 
+        @property
+        def min_active_well_enclosure(self) -> _prp.Enclosure:
+            active = self.mosfet.gate.active
+            oxide = self.mosfet.gate.oxide
+            well = self.mosfet.well
+            if well is None:
+                raise AttributeError("No well enclosure for MOSFET without a well")
+            well_idx = active.well.index(well)
+
+            if oxide is None:
+                return active.min_well_enclosure[well_idx]
+            try:
+                encs = active.min_well_enclosure4oxide[oxide]
+            except KeyError:
+                return active.min_well_enclosure[well_idx]
+            else:
+                return encs[well_idx]
+
+        @property
+        def min_active_substrate_enclosure(self) -> Optional[_prp.Enclosure]:
+            if self.mosfet.well is not None:
+                raise AttributeError("No substrate enclosure for MOSFET in a well")
+
+            active = self.mosfet.gate.active
+            oxide = self.mosfet.gate.oxide
+            if oxide is None:
+                return active.min_substrate_enclosure
+            try:
+                return active.min_substrate_enclosure4oxide[oxide]
+            except KeyError:
+                return active.min_substrate_enclosure
+
     @property
     def computed(self):
         """the computed property allows to get values for parameters that
@@ -877,11 +910,15 @@ class MOSFET(_DevicePrimitive):
         specify `min_l`. Then `nmos.min_l` is `None` and `nmos.computed.min_l`
         is equal to `nmos.gate.computed.min_l`, which can then
         refer further to `nmos.gate.poly.min_width`.
-        This separation is done to server different use cases. When looking
+        This separation is done to serve different use cases. When looking
         at DRC rules `gate.min_l` being `None` indicated no extra rule
         needs to be generated for this gate. For layout it is easier to use
         `gate.computed.min_l` to derive the dimension of the device to be
         drawn.
+
+        Additionally the `min_active_well_enclosure` and
+        `min_active_substrate_enclosure` properties are there that return
+        the value taking into account possible oxide dependent values.
         """
         return MOSFET._ComputedProps(self)
 
@@ -1072,22 +1109,22 @@ class MOSFET(_DevicePrimitive):
         if self.min_contactgate_space is not None:
             assert self.contact is not None
             yield (
-                _msk.Spacing(derivedgate.mask, self.contact.mask)
+                _msk.Spacing(derivedgate.mask, self.contact.mask, without_zero=False)
                 >= self.min_contactgate_space
             )
 
     @property
-    def designmasks(self):
-        yield from super().designmasks
-        yield from self.gate.designmasks
+    def submasks(self) -> Iterable[_msk.MaskT]:
+        yield from super().submasks
+        yield from self.gate.submasks
         if self.implant is not None:
             for impl in self.implant:
-                yield from impl.designmasks
+                yield from impl.submasks
         if self.well is not None:
-            yield from self.well.designmasks
+            yield from self.well.submasks
         if self.contact is not None:
             if (self.gate.contact is None) or (self.contact != self.gate.contact):
-                yield from self.contact.designmasks
+                yield from self.contact.submasks
 
 
 class Bipolar(_DevicePrimitive):
@@ -1148,10 +1185,10 @@ class Bipolar(_DevicePrimitive):
         return super()._generate_rules(tech=tech)
 
     @property
-    def designmasks(self) -> Iterable[_msk.DesignMask]:
-        yield from super().designmasks
+    def submasks(self) -> Iterable[_msk.MaskT]:
+        yield from super().submasks
         for indicator in self.indicator:
-            yield from indicator.designmasks
+            yield from indicator.submasks
 BipolarTypeT = Bipolar.BipolarType
 npnBipolar = Bipolar.BipolarType.npn
 pnpBipolar = Bipolar.BipolarType.pnp

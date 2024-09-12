@@ -79,7 +79,7 @@ class Technology(abc.ABC):
                     and shapes on layer primitive2 is returned.
                 max_enclosure: use maximum enclosure for derived primitives.
                     If one of the primitives is a derived primitive (for example WaferWire
-                    in an implant) maximum enclosure value may be used to compute the 
+                    in an implant) maximum enclosure value may be used to compute the
                     minimum space.
                 width: width of the wire to compute min_space for
                     This will be used to lookup minimum space in a space table if
@@ -91,7 +91,7 @@ class Technology(abc.ABC):
                     raise TypeError(
                         "primitive2 may not be specified when width is specified",
                     )
-                if isinstance(primitive1, _prm.conductors._WaferWireIntersect):
+                if not isinstance(primitive1, _prm.DesignMaskPrimitiveT):
                     raise TypeError(
                         "primitive1 may not be a derived Primitive when width is specified",
                     )
@@ -137,30 +137,32 @@ class Technology(abc.ABC):
                                 spec = spec[0]
                             if width > (spec - _geo.epsilon):
                                 spaces.append(value)
-                if isinstance(primitive1, _prm.conductors._WaferWireIntersect):
-                    spaces.append(primitive1.waferwire.min_space)
+                if isinstance(primitive1, _prm.InsidePrimitiveT):
+                    prim = primitive1.prim
+                    assert isinstance(prim, (_prm.WidthSpacePrimitiveT, _prm.Via))
+                    spaces.append(prim.min_space)
 
             if (
-                isinstance(primitive1, _prm.conductors._WaferWireIntersect)
-                and isinstance(primitive2, _prm.WaferWire)
+                isinstance(primitive1, _prm.InsidePrimitiveT)
+                and isinstance(primitive2, _prm.DesignMaskPrimitiveT)
             ):
                 (primitive1, primitive2) = (primitive2, primitive1)
 
             def get_enc(*, ww: _prm.WaferWire, prim: _prm.MaskPrimitiveT):
                 enc = None
-                if prim in ww2.implant:
-                    idx = ww2.implant.index(prim)
-                    enc = ww2.min_implant_enclosure[idx]
-                elif prim in ww2.well:
-                    idx = ww2.well.index(prim)
-                    enc = ww2.min_well_enclosure[idx]
-                elif prim in ww2.oxide:
-                    idx = ww2.oxide.index(prim)
-                    enc = ww2.min_oxide_enclosure[idx]
+                if prim in ww.implant:
+                    idx = ww.implant.index(prim)
+                    enc = ww.min_implant_enclosure[idx]
+                elif prim in ww.well:
+                    idx = ww.well.index(prim)
+                    enc = ww.min_well_enclosure[idx]
+                elif prim in ww.oxide:
+                    idx = ww.oxide.index(prim)
+                    enc = ww.min_oxide_enclosure[idx]
                 else: # pragma: no cover
                     raise RuntimeError(
                         "Internal error: unsupported enclosed layer"
-                        f" '{prim.name}' for '{ww2.name}'")
+                        f" '{prim.name}' for '{p2.name}'")
 
                 return (
                     None if enc is None
@@ -168,20 +170,24 @@ class Technology(abc.ABC):
                     else enc.max()
                 )
 
-            if isinstance(primitive1, _prm.WaferWire):
-                if isinstance(primitive2, _prm.conductors._WaferWireIntersect):
-                    ww2 = primitive2.waferwire
-
+            if isinstance(primitive1, _prm.DesignMaskPrimitiveT):
+                if isinstance(primitive2, _prm.InsidePrimitiveT):
+                    p2 = primitive2.prim
+                    filtin2 = tuple(
+                        p
+                        for p in primitive2.in_
+                        if not isinstance(p, _prm.Marker)
+                    )
                     try:
-                        s = self.min_space(primitive1, ww2)
+                        s = self.min_space(primitive1, p2)
                     except: # pragma: no cover
                         pass
                     else:
                         spaces.append(s)
 
-                    if primitive1 == ww2:
-                        for prim in primitive2.prim:
-                            enc = get_enc(ww=ww2, prim=prim)
+                    if (primitive1 == p2) and isinstance(p2, _prm.WaferWire):
+                        for prim in filtin2:
+                            enc = get_enc(ww=p2, prim=prim)
                             if enc is not None:
                                 try:
                                     s = self.min_space(primitive1, prim)
@@ -190,27 +196,39 @@ class Technology(abc.ABC):
                                 else:
                                     spaces.append(enc + s)
             elif (
-                isinstance(primitive1, _prm.conductors._WaferWireIntersect)
-                and isinstance(primitive2, _prm.conductors._WaferWireIntersect)
+                isinstance(primitive1, _prm.InsidePrimitiveT)
+                and isinstance(primitive2, _prm.InsidePrimitiveT)
             ):
-                ww1 = primitive1.waferwire
-                ww2 = primitive2.waferwire
+                p1 = primitive1.prim
+                filtin1 = tuple(
+                    p
+                    for p in primitive1.in_
+                    if not isinstance(p, _prm.Marker)
+                )
+                p2 = primitive2.prim
+                filtin2 = tuple(
+                    p
+                    for p in primitive2.in_
+                    if not isinstance(p, _prm.Marker)
+                )
 
                 spaces.extend((
-                    self.min_space(ww1, primitive2),
-                    self.min_space(ww2, primitive1),
+                    self.min_space(p1, primitive2),
+                    self.min_space(p2, primitive1),
                 ))
 
                 e1s: List[float] = []
-                for prim in primitive1.prim:
-                    enc = get_enc(ww=ww1, prim=prim)
-                    if enc is not None:
-                        e1s.append(enc)
                 e2s: List[float] = []
-                for prim in primitive2.prim:
-                    enc = get_enc(ww=ww2, prim=prim)
-                    if enc is not None:
-                        e2s.append(enc)
+                if isinstance(p1, _prm.WaferWire):
+                    for prim in filtin1:
+                        enc = get_enc(ww=p1, prim=prim)
+                        if enc is not None:
+                            e1s.append(enc)
+                if isinstance(p2, _prm.WaferWire):
+                    for prim in filtin2:
+                        enc = get_enc(ww=p2, prim=prim)
+                        if enc is not None:
+                            e2s.append(enc)
                 if (len(e1s) > 0) and (len(e2s) > 0):
                     spaces.append(max(e1s) + max(e2s))
 
@@ -221,7 +239,19 @@ class Technology(abc.ABC):
                     f"min_space between {primitive1} and {primitive2} not found",
                 )
 
-        def min_width(self, primitive: "_prm.WidthSpacePrimitiveT", *,
+        @overload
+        def min_width(self,
+            primitive: Union["_prm.WidthSpacePrimitiveT", "_prm.InsidePrimitiveT"], *,
+            up: bool=False, down: bool=False, min_enclosure: bool=False,
+        ) -> float:
+            ... # pragma: no cover
+        @overload
+        def min_width(self, primitive: "_prm.Via") -> float:
+            ... # pragma: no cover
+        def min_width(self,
+            primitive: Union[
+                "_prm.WidthSpacePrimitiveT", "_prm.Via", "_prm.InsidePrimitiveT",
+            ], *,
             up: bool=False, down: bool=False, min_enclosure: bool=False,
         ) -> float:
             """Compute the minimum width of a primitive.
@@ -237,30 +267,48 @@ class Technology(abc.ABC):
                 min_enclosure: if True it will take the minimum value minimum value
                     of the relevant via enclosure rule; otherwise the maximum value.
             """
-            assert primitive.min_width is not None, (
-                "primitive has to have the min_with attribute"
-            )
+            if isinstance(primitive, _prm.WidthSpacePrimitiveT):
+                def wupdown(via):
+                    if up and (primitive in via.bottom):
+                        idx = via.bottom.index(primitive)
+                        enc = via.min_bottom_enclosure[idx]
+                        w = via.width
+                    elif down and (primitive in via.top):
+                        idx = via.top.index(primitive)
+                        enc = via.min_top_enclosure[idx]
+                        w = via.width
+                    else:
+                        enc = _prp.Enclosure(0.0)
+                        w = 0.0
 
-            def wupdown(via):
-                if up and (primitive in via.bottom):
-                    idx = via.bottom.index(primitive)
-                    enc = via.min_bottom_enclosure[idx]
-                    w = via.width
-                elif down and (primitive in via.top):
-                    idx = via.top.index(primitive)
-                    enc = via.min_top_enclosure[idx]
-                    w = via.width
-                else:
-                    enc = _prp.Enclosure(0.0)
-                    w = 0.0
+                    enc = enc.min() if min_enclosure else enc.max()
+                    return w + 2*enc
 
-                enc = enc.min() if min_enclosure else enc.max()
-                return w + 2*enc
+                return max((
+                    primitive.min_width,
+                    *(wupdown(via) for via in self.tech.primitives.__iter_type__(_prm.Via)),
+                ))
+            elif isinstance(primitive, _prm.Via):
+                return primitive.width
+            elif isinstance(primitive, _prm.InsidePrimitiveT):
+                from itertools import combinations
 
-            return max((
-                primitive.min_width,
-                *(wupdown(via) for via in self.tech.primitives.__iter_type__(_prm.Via)),
-            ))
+                main = primitive.prim
+                assert isinstance(main, (_prm.WidthSpacePrimitiveT, _prm.InsidePrimitiveT))
+                mws = tuple(self.tech.primitives.__iter_type__(_prm.MinWidth))
+
+                ws = [self.min_width(
+                    primitive=main, up=up, down=down, min_enclosure=min_enclosure,
+                )]
+                for n in range(len(primitive.in_)):
+                    for in2 in combinations(primitive.in_, n + 1):
+                        ins = _prm._derived._InsidePrimitive(prim=main, in_=in2)
+                        for mw in mws:
+                            if mw.prim == ins:
+                                ws.append(mw.min_width)
+                return max(ws)
+            else:
+                raise TypeError("Wrong type for primitive")
 
         def min_pitch(self, primitive: "_prm.WidthSpacePrimitiveT", *,
             up: bool=False, down: bool=False, min_enclosure: bool=False,
@@ -618,7 +666,7 @@ class Technology(abc.ABC):
         self._rules = rules = _rle.Rules()
 
         # grid
-        rules += _wfr.wafer.grid == self.grid
+        rules += _wfr._wafer_base.grid == self.grid
 
         # Generate the rule but don't add them yet.
         for prim in prims:
@@ -662,14 +710,22 @@ class Technology(abc.ABC):
         return self._primitives
 
     @property
-    def designmasks(self) -> Iterable[_msk.DesignMask]:
-        """Return all the `DesignMask` objects defined by the primitives of the technology.
+    def submasks(self) -> Iterable[_msk.MaskT]:
+        """Return all the `MaskT` objects defined by the primitives of the technology.
 
         The property makes sure there are no duplicates in the returned iterable.
         """
         masks = set()
         for prim in self._primitives:
-            for mask in prim.designmasks:
+            for mask in prim.submasks:
                 if mask not in masks:
                     yield mask
                     masks.add(mask)
+
+    @property
+    def designmasks(self) -> Iterable[_msk.DesignMask]:
+        """Return all the `DesignMask` objects defined by the primitives of the technology.
+
+        The property makes sure there are no duplicates in the returned iterable.
+        """
+        return (mask for mask in self.submasks if isinstance(mask, _msk.DesignMask))

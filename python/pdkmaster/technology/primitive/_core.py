@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later OR GPL-2.0-or-later OR CERN-OHL-S-2.0+ OR Apache-2.0
 import abc
-from typing import List, Tuple, Iterable, Union, Optional, cast
+from typing import List, Tuple, Iterable, Union, Optional, cast, final
 
 from ... import _util
 from ...typing import MultiT, cast_MultiT
@@ -85,9 +85,15 @@ class _Primitive(abc.ABC):
             )
         self._rules = tuple(self._generate_rules(tech=tech))
 
-    @abc.abstractproperty
-    def designmasks(self) -> Iterable[_msk.DesignMask]:
+    @property
+    @abc.abstractmethod
+    def submasks(self) -> Iterable[_msk.MaskT]:
         return tuple()
+
+    @property
+    @final
+    def designmasks(self) -> Iterable[_msk.DesignMask]:
+        return (mask for mask in self.submasks if isinstance(mask, _msk.DesignMask))
 PrimitiveT = _Primitive
 
 
@@ -113,8 +119,8 @@ class _MaskPrimitive(_Primitive):
             yield cast(_rle.RuleT, self.mask)
 
     @property
-    def designmasks(self):
-        return self.mask.designmasks
+    def submasks(self) -> Iterable[_msk.MaskT]:
+        return self.mask.submasks
 
     def remove(self, what: MultiT["MaskPrimitiveT"], *args: "MaskPrimitiveT") -> "MaskPrimitiveT":
         """Return a MaskPrimitive based on the MaskPrimitive but with
@@ -259,7 +265,7 @@ class _WidthSpacePrimitive(_MaskPrimitive):
         if self.space_table is not None:
             for row in self.space_table:
                 w = row[0]
-                if isinstance(w, float):
+                if isinstance(w, (int, float)):
                     submask = self.mask.parts_with(
                         condition=self.mask.width >= w,
                     )
@@ -268,7 +274,7 @@ class _WidthSpacePrimitive(_MaskPrimitive):
                         self.mask.width >= w[0],
                         self.mask.length >= w[1],
                     ))
-                yield _msk.Spacing(submask, self.mask) >= row[1]
+                yield _msk.Spacing(submask, self.mask, without_zero=False) >= row[1]
         try:
             pin: Marker = self.pin # type: ignore
         except AttributeError:

@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later OR GPL-2.0-or-later OR CERN-OHL-S-2.0+ OR Apache-2.0
 import abc
-from typing import Tuple, Iterable, Optional, ClassVar, cast
+from typing import Tuple, Iterable, Optional, ClassVar, cast, final
 
 from ..typing import MultiT, cast_MultiT
 from . import rule as _rle, property_ as _prp
 
 
-__all__ = ["MaskT", "RuleMaskT", "DesignMask", "Join", "Intersect"]
+__all__ = ["MaskT", "RuleMaskT", "MaskAliasT", "DesignMask", "Join", "Intersect"]
 
 
 class _MaskProperty(_prp._Property):
@@ -189,7 +189,7 @@ class _Mask(abc.ABC):
             mask = Join(what)
         return _MaskRemove(from_=self, what=mask)
 
-    def alias(self, name: str) -> "RuleMaskT":
+    def alias(self, name: str) -> "MaskAliasT":
         """Returns a derived `MaskT` given an alias for another `MaskT` object.
         The return object is also a `_Rule` object in order for scripts that
         are generated from rules can define a variable representing the
@@ -214,16 +214,29 @@ class _Mask(abc.ABC):
         """
         return _SameNet(mask=self)
 
-    @abc.abstractproperty
-    def designmasks(self) -> Iterable["DesignMask"]: # pragma: no cover
+    @property
+    @abc.abstractmethod
+    def submasks(self) -> Iterable["MaskT"]:
+        """The subnasks property of a `MaskT` object gives a list of
+        all masks used in a `MaskT`, including itself.
+
+        API Notes:
+            * The returned Iterable may contain same `MaskT` object multiple
+              times. User who need a unique set can use a `set` object for that.
+        """
+        ... # pragma: no cover
+
+    @property
+    @final
+    def designmasks(self) -> Iterable["DesignMask"]:
         """The designasks property of a `MaskT` object gives a list of
-        all designamsks used in a `MaskT`.
+        all designmasks used in a `MaskT`.
 
         API Notes:
             * The returned Iterable may contain same `DesignMask` object multiple
               times. User who need a unique set can use a `set` object for that.
         """
-        ...
+        return (mask for mask in self.submasks if isinstance(mask, DesignMask))
 
     @abc.abstractmethod
     def __eq__(self, other: object) -> bool: # pragma: no cover
@@ -260,7 +273,7 @@ class DesignMask(_RuleMask):
         return f"design({self.name})"
 
     @property
-    def designmasks(self) -> Iterable["DesignMask"]:
+    def submasks(self) -> Iterable["MaskT"]:
         return (self,)
 
     def __eq__(self, other: object) -> bool:
@@ -298,8 +311,8 @@ class _PartsWith(_Mask):
         ))
 
     @property
-    def designmasks(self) -> Iterable[DesignMask]:
-        return self.mask.designmasks
+    def submasks(self) -> Iterable[MaskT]:
+        return self.mask.submasks
 
     def __eq__(self, other: object) -> bool:
         if type(self) != type(other):
@@ -327,9 +340,9 @@ class Join(_Mask):
         self._hash: Optional[int] = None
 
     @property
-    def designmasks(self) -> Iterable[DesignMask]:
+    def submasks(self) -> Iterable[MaskT]:
         for mask in self.masks:
-            yield from mask.designmasks
+            yield from mask.submasks
 
     def __eq__(self, other: object) -> bool:
         if self.__class__ is not other.__class__:
@@ -360,9 +373,9 @@ class Intersect(_Mask):
         self._hash: Optional[int] = None
 
     @property
-    def designmasks(self) -> Iterable[DesignMask]:
+    def submasks(self) -> Iterable[MaskT]:
         for mask in self.masks:
-            yield from mask.designmasks
+            yield from mask.submasks
 
     def __eq__(self, other: object) -> bool:
         if self.__class__ is not other.__class__:
@@ -388,9 +401,9 @@ class _MaskRemove(_Mask):
         self.what = what
 
     @property
-    def designmasks(self) -> Iterable[DesignMask]:
+    def submasks(self) -> Iterable[MaskT]:
         for mask in (self.from_, self.what):
-            yield from mask.designmasks
+            yield from mask.submasks
 
     def __eq__(self, other: object) -> bool:
         if self.__class__ is not other.__class__:
@@ -417,8 +430,8 @@ class _MaskAlias(_RuleMask):
         return f"{self.mask.name}.alias({self.name})"
 
     @property
-    def designmasks(self) -> Iterable[DesignMask]:
-        return self.mask.designmasks
+    def submasks(self) -> Iterable[MaskT]:
+        return (*self.mask.submasks, self)
 
     def __eq__(self, other: object) -> bool:
         if self.__class__ is not other.__class__:
@@ -432,6 +445,7 @@ class _MaskAlias(_RuleMask):
 
     def __hash__(self) -> int:
         return super().__hash__()
+MaskAliasT = _MaskAlias
 
 
 class Spacing(_DualMaskProperty):
@@ -440,12 +454,13 @@ class Spacing(_DualMaskProperty):
     The masks may not be the same. For the space between shapes on the same
     mask use the `MaskT.space` property.
     """
-    def __init__(self, mask1: MaskT, mask2: MaskT):
+    def __init__(self, mask1: MaskT, mask2: MaskT, *, without_zero: bool):
         if mask1 == mask2:
             raise ValueError(
                 f"mask1 and mask2 may not be the same for 'Spacing'\n"
                 "use `MaskT.space` property for that"
             )
+        self.without_zero = without_zero
         super().__init__(mask1=mask1, mask2=mask2, name="space", commutative=True)
 
 
@@ -513,8 +528,8 @@ class _SameNet(_Mask):
         super().__init__(name=f"same_net({mask.name})")
 
     @property
-    def designmasks(self) -> Iterable[DesignMask]:
-        return self.mask.designmasks
+    def submasks(self) -> Iterable[MaskT]:
+        return self.mask.submasks
 
     def __eq__(self, other: object) -> bool:
         if self.__class__ is not other.__class__:
