@@ -9,10 +9,15 @@ from . import layout as _lay, circuit as _ckt, cell as _cell, library as _lbry
 __all__ = ["FactoryCell", "CellFactory", "BaseCellFactory"]
 
 
-_cell_type_ = TypeVar(name="_cell_type_", bound=_cell.Cell)
-_factory_type_ = TypeVar(name="_factory_type_", bound="CellFactory")
-_factorycell_type_ = TypeVar(name="_factorycell_type_", bound="FactoryCell")
-_factorycell_type2_ = TypeVar(name="_factorycell_type2_", bound="FactoryCell")
+# Manual hack to work around python 3.12 bug
+#_cell_type_ = TypeVar(name="_cell_type_", bound=_cell.Cell)
+#_factory_type_ = TypeVar(name="_factory_type_", bound="CellFactory")
+#_factorycell_type_ = TypeVar(name="_factorycell_type_", bound="FactoryCell")
+#_factorycell_type2_ = TypeVar(name="_factorycell_type2_", bound="FactoryCell")
+_cell_type_ = TypeVar("_cell_type_", bound=_cell.Cell)
+_factory_type_ = TypeVar("_factory_type_", bound="CellFactory")
+_factorycell_type_ = TypeVar("_factorycell_type_", bound="FactoryCell")
+_factorycell_type2_ = TypeVar("_factorycell_type2_", bound="FactoryCell")
 
 
 class _FactoryBase(Generic[_cell_type_]):
