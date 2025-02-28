@@ -10,10 +10,11 @@ Attributes:
 """
 import abc, enum
 from itertools import product
-from math import floor
+from dataclasses import dataclass
+from math import floor, ceil
 from typing import (
     Any, Dict, Iterable, Iterator, Collection, Tuple, List,
-    Optional, Union, TypeVar, cast, overload
+    Optional, Union, TypeVar, cast, overload, Literal,
 )
 
 from .. import _util
@@ -22,7 +23,7 @@ from . import property_ as _prp, mask as _msk
 
 
 __all__ = [
-    "epsilon",
+    "epsilon", "coord_on_grid",
     "Rotation", "FloatPoint",
     "RotationContext", "MoveContext",
     "ShapeT", "RectangularT", "PointsShapeT",
@@ -35,13 +36,80 @@ __all__ = [
 
 
 epsilon: float = 1e-6
-def _eq(v1: float, v2: float):
+def _eq(v1: float, v2: float) -> bool:
     """Compare if two floats have a difference smaller than epsilon
 
     API Notes:
         This function may only be used inside this module
     """
     return (abs(v1 - v2) < epsilon)
+
+
+@dataclass
+class bottop:
+    bot: float
+    top: float
+
+    @property
+    def height(self) -> float:
+        return (self.top - self.bot)
+    @property
+    def mid(self) -> float:
+        return (self.bot + self.top)/2
+
+    def __hash__(self) -> int:
+        return hash((round(self.bot//epsilon), round(self.top//epsilon)))
+
+    def __eq__(self, value: object) -> bool:
+        if isinstance(value, bottop):
+            return _eq(self.bot, value.bot) and _eq(self.top, value.top)
+        else:
+            return False
+
+
+@dataclass
+class leftright:
+    left: float
+    right: float
+
+    @property
+    def width(self) -> float:
+        return (self.right - self.left)
+    @property
+    def mid(self) -> float:
+        return (self.left + self.right)/2
+
+    def __hash__(self) -> int:
+        return hash((round(self.left//epsilon), round(self.right//epsilon)))
+
+    def __eq__(self, value: object) -> bool:
+        if isinstance(value, leftright):
+            return _eq(self.left, value.left) and _eq(self.right, value.right)
+        else:
+            return False
+
+
+def coord_on_grid(*, coord: float, grid: float, rounding: str="nearest") -> float:
+    """This function will return a value on a given grid value. One can specify the
+    rounding. It can be either "floor", "nearest" or "ceiling".
+    """
+    if rounding == "floor":
+        coord += epsilon
+    elif rounding == "ceiling":
+        coord -= epsilon
+    else:
+        if rounding != "nearest":
+            raise ValueError(
+                "rounding has to be one of ('floor', 'nearest', 'ceiling') "
+                f"not '{rounding}'"
+            )
+    flookup = {"nearest": round, "floor": floor, "ceiling": ceil}
+    try:
+        f = flookup[rounding]
+    except KeyError: # pragma: no cover
+        raise RuntimeError(f"Not implemeted: rounding '{rounding}'")
+
+    return f(coord/(grid))*grid
 
 
 _shape_childclass = TypeVar("_shape_childclass", bound="_Shape")
@@ -280,10 +348,7 @@ class _Shape(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def moved(
-        self: "_shape_childclass", *,
-        dxy: "Point", context: Optional[MoveContext]=None
-    ) -> "_shape_childclass":
+    def moved(self, *, dxy: "Point", context: Optional[MoveContext]=None) -> "_Shape":
         """Move a _Shape object by a given vector
 
         This method is called moved() to represent the fact the _Shape objects are
@@ -301,15 +366,22 @@ class _Shape(abc.ABC):
         )
 
     @abc.abstractmethod
-    def rotated(
-        self: "_shape_childclass", *,
-        rotation: Rotation, context: Optional[RotationContext]=None,
-    ) -> "_shape_childclass":
+    def rotated(self, *, rotation: Rotation, context: Optional[RotationContext]=None) -> "_Shape":
         """Rotate a _Shape object by a given vector
 
         This method is called rotated() to represent the fact the _Shape objects are
         immutable and a new object is created by the rotated() method.
         """
+        raise NotImplementedError
+
+    @overload
+    def mirrored(self, *, x0: float) -> "_Shape": ...
+    @overload
+    def mirrored(self, *, y0: float) -> "_Shape": ...
+    @overload
+    def mirrored(self, *, x0: float, y0: float) -> "_Shape": ...
+    @abc.abstractmethod
+    def mirrored(self, *, x0: Optional[float]=None, y0: Optional[float]=None) -> "_Shape":
         raise NotImplementedError
 
     @property
@@ -334,6 +406,34 @@ class _Rectangular(_Shape):
         * This is private class for this module and is not exported by default.
           It should only be used as mixing inside this module.
     """
+    @abc.abstractmethod
+    def moved(self, *, dxy: "Point", context: Optional[MoveContext]=None) -> "_Rectangular":
+        """Move a _Shape object by a given vector
+
+        This method is called moved() to represent the fact the _Shape objects are
+        immutable and a new object is created by the moved() method.
+        """
+        raise NotImplementedError # pragma: no cover
+
+    @abc.abstractmethod
+    def rotated(self, *, rotation: Rotation, context: Optional[RotationContext]=None) -> "_Rectangular":
+        """Rotate a _Shape object by a given vector
+
+        This method is called rotated() to represent the fact the _Shape objects are
+        immutable and a new object is created by the rotated() method.
+        """
+        raise NotImplementedError # pragma: no cover
+
+    @overload
+    def mirrored(self, *, x0: float) -> "_Rectangular": ...
+    @overload
+    def mirrored(self, *, y0: float) -> "_Rectangular": ...
+    @overload
+    def mirrored(self, *, x0: float, y0: float) -> "_Rectangular": ...
+    @abc.abstractmethod
+    def mirrored(self, *, x0: Optional[float]=None, y0: Optional[float]=None) -> "_Rectangular":
+        raise NotImplementedError # pragma: no cover
+
     @property
     @abc.abstractmethod
     def left(self) -> float:
@@ -482,6 +582,17 @@ class Point(_PointsShape, _Rectangular):
         }[rotation]
 
         return Point(x=tx, y=ty)
+
+    @overload
+    def mirrored(self, *, x0: float) -> "Point": ...
+    @overload
+    def mirrored(self, *, y0: float) -> "Point": ...
+    @overload
+    def mirrored(self, *, x0: float, y0: float) -> "Point": ...
+    def mirrored(self, *, x0: Optional[float]=None, y0: Optional[float]=None) -> "Point":
+        x = self.x if x0 is None else (2*x0 - self.x)
+        y = self.y if y0 is None else (2*y0 - self.y)
+        return Point(x=x, y=y)
 
     # _PointsShape base class abstract methods
     @property
@@ -638,6 +749,18 @@ class Line(_PointsShape, _Rectangular):
             point2=self.point2.rotated(rotation=rotation, context=context),
         )
 
+    @overload
+    def mirrored(self, *, x0: float) -> "Line": ...
+    @overload
+    def mirrored(self, *, y0: float) -> "Line": ...
+    @overload
+    def mirrored(self, *, x0: float, y0: float) -> "Line": ...
+    def mirrored(self, **kwargs) -> "Line":
+        return Line(
+            point1=self.point1.mirrored(**kwargs),
+            point2=self.point2.mirrored(**kwargs),
+        )
+
     # _PointsShape mixin abstract methods
     @property
     def points(self) -> Iterable[Point]:
@@ -711,6 +834,17 @@ class Polygon(_PointsShape):
         return Polygon(points=(
             point.rotated(rotation=rotation, context=context)
             for point in self.points
+        ))
+
+    @overload
+    def mirrored(self, *, x0: float) -> "Polygon": ...
+    @overload
+    def mirrored(self, *, y0: float) -> "Polygon": ...
+    @overload
+    def mirrored(self, *, x0: float, y0: float) -> "Polygon": ...
+    def mirrored(self, **kwargs) -> "Polygon":
+        return Polygon(points=(
+            point.mirrored(**kwargs) for point in self.points
         ))
 
     # _PointsShape mixin abstract methods
@@ -801,7 +935,7 @@ class Rect(Polygon, _Rectangular):
 
     @staticmethod
     def from_size(
-        *, center: Point=Point(x=0, y=0), width: float, height: float,
+        *, center: Point=origin, width: float, height: float,
     ) -> "Rect":
         assert (width > 0) and (height > 0)
         x = center.x
@@ -857,6 +991,121 @@ class Rect(Polygon, _Rectangular):
             center=self.center.rotated(rotation=rotation, context=context),
             width=width, height=height,
         )
+
+    @overload
+    def mirrored(self, *, x0: float) -> "Rect": ...
+    @overload
+    def mirrored(self, *, y0: float) -> "Rect": ...
+    @overload
+    def mirrored(self, *, x0: float, y0: float) -> "Rect": ...
+    def mirrored(self, **kwargs) -> "Rect":
+        return Rect.from_size(
+            center=self.center.mirrored(**kwargs), width=self.width, height=self.height,
+        )
+
+    @overload
+    def assure_area(self, *,
+        min_area: Optional[float], grid: float, extensions: Dict[str, Optional[float]],
+        return_self: Literal[True], allow_smaller: bool=False,
+    ) -> "Rect": ...
+    @overload
+    def assure_area(self, *,
+        min_area: Optional[float], grid: float, extensions: Dict[str, Optional[float]],
+        return_self: bool=False, allow_smaller: bool=False,
+    ) -> Optional["Rect"]: ...
+    def assure_area(self, *,
+        min_area: Optional[float], grid: float, extensions: Dict[str, Optional[float]],
+        return_self: bool=False, allow_smaller: bool=False,
+    ) -> Optional["Rect"]:
+        """Extend the rectangle to conform to a minimal area.
+
+        Arguments:
+            min_area: the minimum area to extend to.
+                A value of `None` means not extension of the area; this is done so that the
+                `min_area` property of primitives can be passed to this function without needing
+                to check if the value is not `None`
+            grid: the grid to which the rectangle coordinates have to conform to
+            extensions: specification of direction(s) to which the rectangle may be extended
+                allowed extensions names are:
+                * "min_left"
+                * "min_bottom"
+                * "max_right"
+                * "max_top"
+                * "max_width" (extend both left and right equally)
+                * "max_height" (extends both bottom and top equally)
+                Next to a value also `None` can be given to extend as far as needed for the given direction.
+            return_self: Normally `None` is returned if the rectangle already fulfills the minimum area
+                but when `return_self` is `True` it will return itself instead.
+            allow_smaller: normally an exception is raised when area could be reached but optionally
+                the biggest rectangle fulfilling the extension specifications may be returned by
+                setting allow_smaller to `True`
+        """
+        if (min_area is None) or (self.area > (min_area - epsilon)):
+            return self if return_self else None
+
+        left = self.left
+        bottom = self.bottom
+        right = self.right
+        top = self.top
+        width = right - left
+        height = top - bottom
+        for direction, value in extensions.items():
+            if direction in ("min_left", "max_right", "max_width"):
+                width = coord_on_grid(
+                    coord=(min_area/height),
+                    grid=2*grid if direction == "max_width" else grid,
+                    rounding="ceiling",
+                )
+
+                if direction == "min_left":
+                    left = right - width
+                    if value is not None:
+                        left = max(left, value)
+                        width = right - left
+                elif direction == "max_right":
+                    right = left + width
+                    if value is not None:
+                        right = min(right, value)
+                        width = right - left
+                elif direction == "max_width":
+                    if value is not None:
+                        width = min(width, value)
+                    mid = coord_on_grid(coord=0.5*(left + right), grid=grid)
+                    left = mid - 0.5*width
+                    right = mid + 0.5*width
+            elif direction in ("min_bottom", "max_top", "max_height"):
+                height = coord_on_grid(
+                    coord=(min_area/width),
+                    grid=2*grid if direction == "max_height" else grid,
+                    rounding="ceiling",
+                )
+
+                if direction == "min_bottom":
+                    bottom = top - height
+                    if value is not None:
+                        bottom = max(bottom, value)
+                        height = top - bottom
+                elif direction == "max_top":
+                    top = bottom + height
+                    if value is not None:
+                        top = min(top, value)
+                        height = top - bottom
+                elif direction == "max_height":
+                    if value is not None:
+                        height = min(height, value)
+                    mid = coord_on_grid(coord=0.5*(bottom + top), grid=grid)
+                    bottom = mid - 0.5*height
+                    top = mid + 0.5*height
+            else:
+                raise RuntimeError(f"Unknown direction for extension: '{direction}'")
+
+            if width*height > (min_area - epsilon):
+                return Rect(left=left, bottom=bottom, right=right, top=top)
+
+        if allow_smaller:
+            return Rect(left=left, bottom=bottom, right=right, top=top)
+
+        raise ValueError("Not enough room for area extension")
 
     # overloaded _PointsShape mixin abstract methods
     @property
@@ -990,6 +1239,32 @@ class MultiPath(Polygon):
         """
         pass
 
+    class _GoTo(_Instruction):
+        "Base class for drawing segment up to absolute coordinate"
+        def __init__(self, coord: float):
+            self._coord = coord
+
+        def __eq__(self, obj: object) -> bool:
+            if self.__class__ != obj.__class__:
+                # _Go objects are final and have to be the same class, not just subclasses
+                return False
+            else:
+                assert isinstance(obj, MultiPath._GoTo)
+                return abs(self._coord - obj._coord) < epsilon
+
+    class GoToX(_GoTo):
+        """Go to absolute x coordinate
+
+        API Notes:
+            This class is final, subclassing may cause backwards compatibility problems.
+        """
+    class GoToY(_GoTo):
+        """Go to absolute y coordinate
+
+        API Notes:
+            This class is final, subclassing may cause backwards compatibility problems.
+        """
+
     class Knot(_Instruction):
         """A node is a point where different subpaths start from.
 
@@ -1009,10 +1284,10 @@ class MultiPath(Polygon):
             This class is final, subclassing may cause backwards compatibility problems.
         """
         def __init__(self, *,
-            left: OptMultiT["MultiPath.NoKnot"]=None,
-            down: OptMultiT["MultiPath.NoKnot"]=None,
-            right: OptMultiT["MultiPath.NoKnot"]=None,
-            up: OptMultiT["MultiPath.NoKnot"]=None,
+            left: OptMultiT["MultiPath.NoStart"]=None,
+            down: OptMultiT["MultiPath.NoStart"]=None,
+            right: OptMultiT["MultiPath.NoStart"]=None,
+            up: OptMultiT["MultiPath.NoStart"]=None,
         ):
             n_dirs = sum(ins is not None for ins in (left, down, right, up))
             if n_dirs < 2:
@@ -1024,9 +1299,7 @@ class MultiPath(Polygon):
             self.up = cast_OptMultiT(up)
 
     # All instructions except Start; for typing only
-    NoStart = Union[SetWidth, _Go, Knot]
-    # All instructions except Start & Knot; for typing only
-    NoKnot = Union[SetWidth, _Go]
+    NoStart = Union[SetWidth, _Go, _GoTo, Knot]
 
     class _PointsBuilder:
         def __init__(self, *, first: "MultiPath.Start"):
@@ -1035,6 +1308,7 @@ class MultiPath(Polygon):
             self.prevwidth = first._width
             self.previnstr: MultiPath._Instruction = first
             self.prevdirtype: type = type(first)
+            self.skippedinstr = False
 
             self.clkwcoords: List[Point] = []
             self.cclkwcoords: List[Point] = []
@@ -1182,6 +1456,26 @@ class MultiPath(Polygon):
                     f"Internal error: unknown `_Go` instruction type '{instrtype}'"
                 )
 
+        def translate_goto(self, instr: "MultiPath._GoTo") -> Optional["MultiPath._Go"]:
+            if isinstance(instr, MultiPath.GoToX):
+                dist = instr._coord - self.location.x
+                if dist > epsilon:
+                    return MultiPath.GoRight(dist)
+                elif dist < -epsilon:
+                    return MultiPath.GoLeft(-dist)
+                else: # 0.0
+                    return None
+            elif isinstance(instr, MultiPath.GoToY):
+                dist = instr._coord - self.location.y
+                if dist > epsilon:
+                    return MultiPath.GoUp(dist)
+                elif dist < -epsilon:
+                    return MultiPath.GoDown(-dist)
+                else: # 0.0
+                    return None
+            else:
+                raise RuntimeError("Unhandled GoTo instruction")
+
         def _knot_builder(self, *,
             instrs: Optional[Tuple["MultiPath.NoStart", ...]]
         ) -> Optional["MultiPath._PointsBuilder"]:
@@ -1263,7 +1557,15 @@ class MultiPath(Polygon):
                     ))
             conn_ends(end=self.clkwcoords[-1], start=self.cclkwcoords[-1])
 
-        def do_instr(self, instr: "MultiPath.NoStart"):
+        def do_instr(self, instr: "MultiPath.NoStart") -> None:
+            if isinstance(instr, MultiPath._GoTo):
+                instr2 = self.translate_goto(instr)
+                if instr2 is None:
+                    self.skippedinstr = True
+                    return
+                else:
+                    instr = instr2
+
             prevtype: type = type(self.previnstr)
             if issubclass(prevtype, (MultiPath._Go, MultiPath.Knot)):
                 self.prevdirtype = prevtype
@@ -1281,6 +1583,7 @@ class MultiPath(Polygon):
             if (
                 (instrtype == MultiPath.SetWidth)
                 and (self.prevdirtype == MultiPath.Start)
+                and not self.skippedinstr
             ):
                 raise ValueError(
                     "First instruction after 'Start' may not be 'SetWidth'",
@@ -1305,6 +1608,7 @@ class MultiPath(Polygon):
             self.width = newwidth
 
             self.previnstr = instr
+            self.skippedinstr = False
 
         def finalize(self):
             location = self.location
@@ -1375,6 +1679,8 @@ GoLeft = MultiPath.GoLeft
 GoDown = MultiPath.GoDown
 GoRight = MultiPath.GoRight
 GoUp = MultiPath.GoUp
+GoToX = MultiPath.GoToX
+GoToY = MultiPath.GoToY
 Knot = MultiPath.Knot
 NoStart = MultiPath.NoStart # For typing only
 
@@ -1462,23 +1768,23 @@ class RectRing(_Shape):
 
         pitch_x = rect_width + min_rect_space
         # Rects in horizontal direction besides corners
-        self._n_x = floor(
+        self._n_x = round(
             (
                 self.outer_bound.width
-                - (2*self.rect_width + self._min_rect_space)
+                - 2*self.rect_width - self._min_rect_space
                 + epsilon
-            )/pitch_x
+            )//pitch_x
         )
         assert self._n_x >= 0, "Internal error"
 
         pitch_y = rect_height + min_rect_space
         # Rects in vertical direction besides corners
-        self._n_y = floor(
+        self._n_y = round(
             (
                 self.outer_bound.height
-                - (2*self.rect_height + self._min_rect_space)
+                - 2*self.rect_height - self._min_rect_space
                 + epsilon
-            )/pitch_y
+            )//pitch_y
         )
         assert self._n_y >= 0, "Internal error"
 
@@ -1509,6 +1815,19 @@ class RectRing(_Shape):
     ) -> "RectRing":
         return RectRing(
             outer_bound=self.outer_bound.rotated(rotation=rotation, context=context),
+            rect_width=self.rect_width, rect_height=self.rect_height,
+            min_rect_space=self.min_rect_space,
+        )
+
+    @overload
+    def mirrored(self, *, x0: float) -> "RectRing": ...
+    @overload
+    def mirrored(self, *, y0: float) -> "RectRing": ...
+    @overload
+    def mirrored(self, *, x0: float, y0: float) -> "RectRing": ...
+    def mirrored(self, **kwargs) -> "RectRing":
+        return RectRing(
+            outer_bound=self.outer_bound.mirrored(**kwargs),
             rect_width=self.rect_width, rect_height=self.rect_height,
             min_rect_space=self.min_rect_space,
         )
@@ -1626,10 +1945,21 @@ class Label(_Shape):
         return hash((self.origin, self.text))
 
     def moved(self, *, dxy: Point, context: Optional[MoveContext] = None) -> "Label":
-        return self.__class__(origin=origin.moved(dxy=dxy, context=context), text=self.text)
+        return self.__class__(origin=self.origin.moved(dxy=dxy, context=context), text=self.text)
 
     def rotated(self, *, rotation: Rotation, context: Optional[RotationContext]=None) -> "Label":
-        return self
+        return self.__class__(
+            origin=self.origin.rotated(rotation=rotation, context=context), text=self.text,
+        )
+
+    @overload
+    def mirrored(self, *, x0: float) -> "Label": ...
+    @overload
+    def mirrored(self, *, y0: float) -> "Label": ...
+    @overload
+    def mirrored(self, *, x0: float, y0: float) -> "Label": ...
+    def mirrored(self, **kwargs) -> "Label":
+        return Label(origin=self.origin.mirrored(**kwargs), text=self.text)
 
 
 class MultiPartShape(Polygon):
@@ -1761,6 +2091,18 @@ class MultiPartShape(Polygon):
             )
         )
 
+    @overload
+    def mirrored(self, *, x0: float) -> "MultiPartShape": ...
+    @overload
+    def mirrored(self, *, y0: float) -> "MultiPartShape": ...
+    @overload
+    def mirrored(self, *, x0: float, y0: float) -> "MultiPartShape": ...
+    def mirrored(self, **kwargs) -> "MultiPartShape":
+        return MultiPartShape(
+            fullshape=self.fullshape.mirrored(**kwargs),
+            parts=(part.partshape.mirrored(**kwargs) for part in self.parts),
+        )
+
     # _PointsShape mixin abstract methods
     @property
     def points(self) -> Iterable[Point]:
@@ -1863,6 +2205,17 @@ class MultiShape(_Shape, Collection[_Shape]):
                 polygon.rotated(rotation=rotation, context=context)
                 for polygon in self.pointsshapes
             )
+        )
+
+    @overload
+    def mirrored(self, *, x0: float) -> "MultiShape": ...
+    @overload
+    def mirrored(self, *, y0: float) -> "MultiShape": ...
+    @overload
+    def mirrored(self, *, x0: float, y0: float) -> "MultiShape": ...
+    def mirrored(self, **kwargs) -> "MultiShape":
+        return MultiShape(
+            shapes=(polygon.mirrored(**kwargs) for polygon in self.pointsshapes)
         )
 
     # Collection mixin abstract methods
@@ -1997,6 +2350,23 @@ class RepeatedShape(_Shape):
                 None if self.m_dxy is None
                 else self.m_dxy.rotated(rotation=rotation, context=context)
             )
+        )
+
+    @overload
+    def mirrored(self, *, x0: float) -> "RepeatedShape": ...
+    @overload
+    def mirrored(self, *, y0: float) -> "RepeatedShape": ...
+    @overload
+    def mirrored(self, *, x0: float, y0: float) -> "RepeatedShape": ...
+    def mirrored(self, **kwargs) -> "RepeatedShape":
+        return RepeatedShape(
+            shape=self.shape.mirrored(**kwargs),
+            offset0=self.offset0.mirrored(**kwargs),
+            n=self.n, n_dxy=self.n_dxy.mirrored(**kwargs),
+            m=self.m, m_dxy=(
+                None if self.m_dxy is None
+                else self.m_dxy.mirrored(**kwargs)
+            ),
         )
 
     @property

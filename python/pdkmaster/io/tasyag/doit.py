@@ -14,7 +14,6 @@ from pdkmaster.design import library as _lbry
 
 __all__ = [
     "LibertyCornerDataT",
-    "avertec_top", "avt_shell",
     "AVTScriptAction",
     "RTLTaskT", "LibertyTaskT", "TaskManager",
 ]
@@ -23,19 +22,15 @@ __all__ = [
 LibertyCornerDataT = Dict[str, Dict[str, Tuple[float, float, Collection[Path]]]]
 
 
-avertec_top = get_var_env("avertec_top")
-avt_shell = get_var_env(
-    "avt_shell", default=(
-        f"{avertec_top}/bin/avt_shell" if avertec_top is not None else None
-    ),
-)
-
-
 class AVTScriptAction(BaseAction):
-    def __init__(self, *, avt_script: str, work_dir: Path, mkdirs: MultiT[Path]=()):
+    def __init__(self, *, avt_script: str, work_dir: Path, mkdirs: MultiT[Path]=(), avt_shell: Optional[str]=None):
+        if avt_shell is None:
+            avt_shell = get_var_env("avt_shell", default="/bin/env avt_shell")
+
         self.script = avt_script
         self._work_dir = work_dir
         self.mkdirs = cast_MultiT(mkdirs)
+        self.avt_shell = avt_shell
 
         self.out = None
         self.err = None
@@ -48,15 +43,12 @@ class AVTScriptAction(BaseAction):
         for d in (self._work_dir, *self.mkdirs):
             d.mkdir(parents=True, exist_ok=True)
 
-        if avt_shell is None:
-            action = CmdAction('echo "disabled because lack of avt_shell"')
-        else:
-            pr, pw = os.pipe()
-            fpw = os.fdopen(pw, "w")
-            fpw.write(self.script)
-            fpw.close()
+        pr, pw = os.pipe()
+        fpw = os.fdopen(pw, "w")
+        fpw.write(self.script)
+        fpw.close()
 
-            action = CmdAction(avt_shell, stdin=pr, cwd=self._work_dir)
+        action = CmdAction(self.avt_shell, stdin=pr, cwd=self._work_dir)
 
         r = action.execute(out=out, err=err)
         self.values = action.values
@@ -74,6 +66,7 @@ class _RTLTask:
         manager: "TaskManager", task_name: str, work_dir: Path, override_dir: Optional[Path],
         libs: Tuple[str, ...], spice_model_files: Tuple[Path, ...],
         extra_filedep: Tuple[Union[str, Path], ...], extra_taskdep: Tuple[str, ...],
+        avt_shell: Optional[str]=None,
     ) -> None:
         self._mng = manager
         self._task_name = task_name
@@ -84,6 +77,7 @@ class _RTLTask:
         self._spice_model_files = spice_model_files
         self._extra_filedep = extra_filedep
         self._extra_taskdep = extra_taskdep
+        self._avt_shell = avt_shell
 
     def _rtl_script(self, lib, lang):
         mng = self._mng
@@ -186,10 +180,7 @@ class _RTLTask:
             return tuple(tgts)
 
         def rtl_title(task):
-            return (
-                f"Creating {task.name[4:]} files" if avt_shell is not None
-                else f"missing avt_shell; no {task.name[4:]} files created"
-            )
+            return f"Creating {task.name[4:]} files"
 
         for lib in self._libs:
             spice_dir = openpdk_tree.views_dir(lib_name=lib, view_name="spice")
@@ -211,6 +202,7 @@ class _RTLTask:
                         AVTScriptAction(
                             avt_script=self._rtl_script(lib, lang), work_dir=self._work_dir,
                             mkdirs=openpdk_tree.views_dir(lib_name=lib, view_name=lang),
+                            avt_shell=self._avt_shell,
                         ),
                         (self._rtl_override, (lib, lang)),
                     )
@@ -246,6 +238,7 @@ class _LibertyTask:
         manager: "TaskManager", work_dir: Path, corner_data: LibertyCornerDataT,
         rtl_task_name: str,
         extra_filedep: Tuple[Union[str, Path], ...], extra_taskdep: Tuple[str, ...],
+        avt_shell: Optional[str]=None,
     ) -> None:
         self._mng = manager
         self._work_dir = work_dir
@@ -255,13 +248,11 @@ class _LibertyTask:
         self._rtl_task_name = rtl_task_name
         self._extra_filedep = extra_filedep
         self._extra_taskdep = extra_taskdep
+        self._avt_shell = avt_shell
 
     def _liberty_title(self, task):
         lib, corner = task.name[8:].split("_")
-        return (
-            f"Creating liberty files for library {lib}, corner {corner}" if avt_shell is not None
-            else "missing avt_shell; no liberty files created for library {lib}, corner {corner}"
-        )
+        return f"Creating liberty files for library {lib}, corner {corner}"
 
     def _liberty_script(self,
             lib: str, corner: str, voltage: float, temp: float, model_files: Collection[Path],
@@ -414,6 +405,7 @@ class _LibertyTask:
                         AVTScriptAction(
                             avt_script=self._liberty_script(lib, corner, *corner_data),
                             work_dir=tmp, mkdirs=(tmp, liberty_dir),
+                            avt_shell=self._avt_shell,
                         ),
                         (self._fix_lib, (lib, corner)),
                     ),
@@ -424,15 +416,13 @@ LibertyTaskT = _LibertyTask
 class TaskManager(_PDKMasterTaskManager):
     def __init__(self, *,
         tech_cb: Callable[[], _tch.Technology],
-        export_techname: Optional[str]=None,
         lib4name_cb: Callable[[str], _lbry.Library],
         cell_list: Dict[str, Collection[str]],
         top_dir: Path, openpdk_tree: OpenPDKTree,
         spice_models_dir: Optional[Path]=None,
     ) -> None:
         super().__init__(
-            tech_cb=tech_cb, export_techname=export_techname,
-            lib4name_cb=lib4name_cb, cell_list=cell_list,
+            tech_cb=tech_cb, lib4name_cb=lib4name_cb, cell_list=cell_list,
             top_dir=top_dir, openpdk_tree=openpdk_tree,
         )
         self._tech_dir = tech_dir = openpdk_tree.tool_dir(tool_name="klayout")

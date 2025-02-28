@@ -104,6 +104,24 @@ class _PrimitiveLayoutParam(_LayoutParam):
 
         return value
 
+class _PinLayoutParam(_PrimitiveLayoutParam):
+    def __init__(self, *,
+        primitive: _prm.PinAttrPrimitiveT, name: str, allow_none=False, default=None,
+    ):
+        super().__init__(
+            primitive=primitive, name=name, allow_none=allow_none, default=default,
+            choices=primitive.pin,
+        )
+        self._primitive: _prm.MetalWire
+
+    def cast(self, value: Any):
+        if isinstance(value, bool):
+            if value:
+                value = self._primitive.pin
+            else:
+                value = None
+        return super().cast(value)
+
 
 class _PrimitivesLayoutParam(_LayoutParam):
     value_type_str = "iterable of '_Primitive'"
@@ -284,17 +302,12 @@ class _LayoutParamCaster(_dsp.PrimitiveDispatcher):
 
     def _Primitive(self, prim: _prm.PrimitiveT, **params: Any) -> Dict[str, Any]:
         out = {}
-        try:
-            pin: _prm.Marker = prim.pin # type: ignore
-        except AttributeError:
-            pass
-        else:
-            out.update(self.cast_params(
-                layout_params=_PrimitiveLayoutParam(
-                    primitive=prim, name="pin", allow_none=True, choices=pin,
-                ),
-                prim_params=params,
-            ))
+        if hasattr(prim, "pin"):
+            pin_prim = cast(_prm.PinAttrPrimitiveT, prim)
+            pinparam = _PinLayoutParam(
+                primitive=pin_prim, name="pin", allow_none=True,
+            )
+            out.update(self.cast_params(layout_params=pinparam, prim_params=params))
 
         if len(prim.ports) > 0:
             try:
@@ -433,6 +446,7 @@ class _LayoutParamCaster(_dsp.PrimitiveDispatcher):
                 ),
             ))
         else:
+            assert prim.well
             ww_params["well"] = prim.well[0]
             layparams.append(
                 _EnclosureLayoutParam(
@@ -458,7 +472,7 @@ class _LayoutParamCaster(_dsp.PrimitiveDispatcher):
         if len(implant) != len(enclosure):
             if len(implant) == 0:
                 raise TypeError(
-                    f"Enclusore specified without an implant layer for WaferWire `{prim.name}`"
+                    f"Enclosure specified without an implant layer for WaferWire `{prim.name}`"
                 )
             elif len(enclosure) == 0:
                 # Use minimum enclosure for all implants

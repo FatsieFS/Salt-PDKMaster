@@ -9,73 +9,19 @@ from pdkmaster import _util
 from pdkmaster.technology import geometry as _geo, mask as _msk
 from pdkmaster.design import layout as _lay, cell as _cell, library as _lbry
 from pdkmaster.design.layout import layout_ as _laylay
-from .export import export2db
+from .import_ import import_poly2poly, import_region2poly
+from .export import export_poly2region
 
 import pya
 
 __all__ = ["merge"]
 
 
-def _export_polygon(polygon: _geo.Polygon) -> pya.Region:
-    """Convert PKDMaster _Shape to klayout db object
-
-    The object is converted to integer based shape in order to insert it in
-    a klayout Region object
-
-    API Notes:
-        This function is for internal use and does not have backwards compatibility
-        guarantee.
-    """
-    dshape = export2db(polygon)
-    return pya.Region(dshape.to_itype(_geo.epsilon))
-
-
-def _import_polygon(polygon) -> _geo.Polygon:
-    """Convert klayout db to PKDMaster Polygon object
-
-    API Notes:
-        This function is for internal use and does not have backwards compatibility
-        guarantee.
-    """
-    if isinstance(polygon, pya.Box):
-        box = polygon.to_dtype(_geo.epsilon)
-        return _geo.Rect(
-            left=box.left, bottom=box.bottom, right=box.right, top=box.top,
-        )
-    elif polygon.is_box():
-        box = polygon.bbox().to_dtype(_geo.epsilon)
-        return _geo.Rect(
-            left=box.left, bottom=box.bottom, right=box.right, top=box.top,
-        )
-    else:
-        poly2 = (
-            polygon if isinstance(polygon, pya.SimplePolygon)
-            else polygon.to_simple_polygon()
-        )
-        spoly = poly2.to_dtype(_geo.epsilon)
-        p0 = _util.get_first_of(spoly.each_point())
-        return _geo.Polygon(points=(
-            *(_geo.Point(x=p.x, y=p.y) for p in spoly.each_point()),
-            _geo.Point(x=p0.x, y=p0.y),
-        ))
-
-
-def _import_regionshape(region: pya.Region) -> _geo.Polygon:
-    """Convert pya.Region containing a single polygon to a PDKMaster _geo.Polygon object.
-    """
-    region.merge()
-
-    polys = tuple(region.each())
-    assert len(polys) == 1
-
-    return _import_polygon(polys[0])
-
-
 class _MPSDictElemMPS:
     def __init__(self, *, mps_orig: _geo.MultiPartShape):
         partshapes = list(part.partshape for part in mps_orig.parts)
         self.partregions = list(
-            _export_polygon(partshape) for partshape in partshapes
+            export_poly2region(partshape) for partshape in partshapes
         )
         # Parts can be removed, mark them by deferring original number to new number
         self.partidcs: List[int] = list(range(len(mps_orig.parts)))
@@ -104,9 +50,9 @@ class _MPSDictElemMPS:
             lookedup = list(self.lookup_partidx(i) for i in range(len(self.partregions)))
             uni = list(sorted(set(lookedup)))
             partregions = tuple(self.partregions[idx] for idx in uni)
-            parts = map(_import_regionshape, partregions)
+            parts = map(import_region2poly, partregions)
             fullshaperegion = sum(partregions, pya.Region())
-            fullshape = _import_regionshape(fullshaperegion)
+            fullshape = import_region2poly(fullshaperegion)
             self.mps = _geo.MultiPartShape(fullshape=fullshape, parts=parts)
             self.mpsidcs = tuple(uni.index(i) for i in lookedup)
         assert self.mpsidcs is not None
@@ -143,9 +89,9 @@ class _MPSDictElem:
         self.partidcs: Optional[List[int]]
         self.partidcs = None
         self.mpsdict = mpsdict
-        fullshaperegion = _export_polygon(mps.fullshape)
+        fullshaperegion = export_poly2region(mps.fullshape)
         self._partregions = partregions = list(
-            _export_polygon(part.partshape) for part in mps.parts
+            export_poly2region(part.partshape) for part in mps.parts
         )
 
         # Check sum of parts is fullshape
@@ -208,7 +154,7 @@ class _MPSDictElem:
             )
 
     def change_shape_part(self, *, idx: int, shape: _geo.Polygon):
-        shaperegion = _export_polygon(shape)
+        shaperegion = export_poly2region(shape)
         self._partregions[idx] = shaperegion
 
         assert (self.elemmps is not None) and (self.partidcs is not None)
@@ -310,7 +256,7 @@ class _PartRef(_ShapeReffed):
         region = elem.partregions[self.idx]
         region += polygon # type: ignore
 
-        self.change_shape_to(_import_regionshape(region))
+        self.change_shape_to(import_region2poly(region))
 
     def change_shape_to(self, shape: _geo.Polygon) -> None:
         elem = self.elem
@@ -334,7 +280,7 @@ class _PartRef(_ShapeReffed):
         # Merge other shape in our shape
         region = self.region
         region += ref.region
-        self.change_shape_to(_import_regionshape(region))
+        self.change_shape_to(import_region2poly(region))
 
         # Mark second part as merged to the first one
         partidx = elem.partidcs[self.idx]
@@ -489,8 +435,8 @@ class _ShapeMerger:
                 # Try to merge on object that don't have area computation implemented
                 pass
             else:
-                if area < (_geo.epsilon**2) or isinstance(shape, _geo.RepeatedShape):
-                    # Zero area shapes are retained as is.
+                if area < (_geo.epsilon**2) or isinstance(shape, (_geo.RepeatedShape, _geo.RectRing)):
+                    # Zero area and repeated shapes are retained as is.
                     shapes.append(_ShapeRef(shape=shape))
                     self(shape)
                     continue
@@ -508,7 +454,7 @@ class _ShapeMerger:
                 partmps_list.append(_PartRef(elem=klmps, idx=idx))
             else:
                 assert isinstance(shape, _geo.Polygon)
-                polygons += _export_polygon(shape)
+                polygons += export_poly2region(shape)
         polygons.merge()
 
         # Join polygons from polygons into the MultiPartShape objects
@@ -544,7 +490,7 @@ class _ShapeMerger:
                         merged = True
 
         # Add remaining polygons
-        shapes.extend(_ShapeRef(shape=_import_polygon(poly)) for poly in polygons.each())
+        shapes.extend(_ShapeRef(shape=import_poly2poly(poly)) for poly in polygons.each())
         # Add converted parts
         filtered = filter(lambda ref: not ref.is_merged, partmps_list)
         shapes.extend(filtered)

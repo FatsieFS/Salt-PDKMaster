@@ -203,6 +203,8 @@ class WaferWire(_WidthSpaceConductor):
         min_implant_enclosure: the minimum required enclosure by the implant
             over the waferwire. If a single enclosure is specified it is
             the spec for all the implants.
+        min_implant_enclosure_same_type: allow to specify other implant enclosure
+            for WaferWires with the same implant type as the well/bulk.
         implant_abut: wether to allow the abutment of two waferwire shapes
             of opposite type.
         allow_contactless_implant: wether to allow waferwire shapes without
@@ -216,8 +218,8 @@ class WaferWire(_WidthSpaceConductor):
             connect to that well.
         min_well_enclosure: the minimum required enclosure of the WaferWire by
             the well. If only one value is given it is valid for all the wells.
-        min_well_enclosure_same_type: allow to specify other enclosure for
-            WaferWires with the same type as the well.
+        min_well_enclosure_same_type: allow to specify other well enclosure for
+            WaferWires with the same implant type as the well.
         min_well_enclosure4oxide: allow to specify well enclosure for WaferWire
             inside an oxide. Typically used when the active-well enclosure is
             bigger for thick gate oxide devices than for regular devices.
@@ -242,6 +244,7 @@ class WaferWire(_WidthSpaceConductor):
     def __init__(self, *,
         implant: MultiT[Implant],
         min_implant_enclosure: MultiT[_prp.Enclosure],
+        min_implant_enclosure_same_type: OptMultiT[Optional[_prp.Enclosure]]=None,
         implant_abut: Union[str, MultiT[Implant]],
         allow_contactless_implant: bool,
         allow_in_substrate: bool,
@@ -265,6 +268,9 @@ class WaferWire(_WidthSpaceConductor):
                 raise TypeError(f"well '{impl.name}' may not be part of implant")
         self.min_implant_enclosure = min_implant_enclosure = cast_MultiT_n(
             min_implant_enclosure, n=len(implant),
+        )
+        self.min_implant_enclosure_same_type = cast_OptMultiT_n(
+            min_implant_enclosure_same_type, n=len(implant),
         )
         if isinstance(implant_abut, str):
             _conv: Dict[str, Tuple[Implant, ...]] = {
@@ -360,13 +366,44 @@ class WaferWire(_WidthSpaceConductor):
                 and (impl.type_.value == tech.base.type_.value)
             ):
                 yield _msk.Connect(sd_mask_impl, substrate_mask)
-            if impl not in self.implant_abut:
-                yield _edg.MaskEdge(impl.mask).interact_with(self.mask).length == 0
-            enc = self.min_implant_enclosure[i]
-            yield self.mask.enclosed_by(impl.mask) >= enc
             for w in self.well:
                 if impl.type_ == w.type_:
                     yield _msk.Connect(sd_mask_impl, w.mask)
+
+            if impl not in self.implant_abut:
+                yield _edg.MaskEdge(impl.mask).interact_with(self.mask).length == 0
+
+            enc = self.min_implant_enclosure[i]
+            if self.min_implant_enclosure_same_type is None:
+                yield self.mask.enclosed_by(impl.mask) >= enc
+            else:
+                enc2 = self.min_implant_enclosure_same_type[i]
+                if enc2 is None:
+                    yield self.mask.enclosed_by(impl.mask) >= enc
+                else:
+                    for ww in (
+                        self.in_(well)
+                        for well in filter(
+                            # other type
+                            lambda well2: well2.type_ != impl.type_, self.well,
+                        )
+                    ):
+                        yield ww.mask.enclosed_by(impl.mask) >= enc
+                    for ww in (
+                        self.in_(well)
+                        for well in filter(
+                            # same type
+                            lambda well2: well2.type_ == impl.type_, self.well,
+                        )
+                    ):
+                        yield ww.mask.enclosed_by(impl.mask) >= enc2
+
+                    actsubstr_mask = _msk.Intersect((self.mask, substrate_mask))
+                    if tech.base.type_.value != impl.type_.value:
+                        yield actsubstr_mask.enclosed_by(impl.mask) >= enc
+                    else:
+                        yield actsubstr_mask.enclosed_by(impl.mask) >= enc2
+
         # Connect well/bulk if implant of n or p type is missing
         nimpls = tuple(filter(lambda impl: impl.type_ == nImpl, self.implant))
         pimpls = tuple(filter(lambda impl: impl.type_ == pImpl, self.implant))
@@ -664,6 +701,7 @@ class PadOpening(_WidthSpaceConductor):
     ) -> Iterable[_rle.RuleT]:
         yield from super()._generate_rules(tech=tech)
 
+        yield _msk.Connect(self.bottom.mask, self.mask)
         yield (
             self.mask.enclosed_by(self.bottom.mask)
             >= self.min_bottom_enclosure

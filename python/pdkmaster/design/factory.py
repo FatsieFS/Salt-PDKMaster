@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later OR GPL-2.0-or-later OR CERN-OHL-S-2.0+ OR Apache-2.0
 import abc
-from typing import Optional, Any, Type, TypeVar, Generic, cast, overload, Callable
+from typing import Optional, Type, TypeVar, Generic, overload, Callable
 
 from ..technology import technology_ as _tch
 from . import layout as _lay, circuit as _ckt, cell as _cell, library as _lbry
@@ -9,7 +9,7 @@ from . import layout as _lay, circuit as _ckt, cell as _cell, library as _lbry
 __all__ = ["FactoryCell", "CellFactory", "BaseCellFactory"]
 
 
-# Manual hack to work around python 3.12 bug
+# Work around python 3.12 bug
 #_cell_type_ = TypeVar(name="_cell_type_", bound=_cell.Cell)
 #_factory_type_ = TypeVar(name="_factory_type_", bound="CellFactory")
 #_factorycell_type_ = TypeVar(name="_factorycell_type_", bound="FactoryCell")

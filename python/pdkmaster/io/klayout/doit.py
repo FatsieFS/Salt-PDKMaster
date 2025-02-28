@@ -62,8 +62,8 @@ class _KlayoutExportTask:
         mng = self._mng
 
         expo = FileExporter(
-            tech=mng.tech, gds_layers=mng.gds_layers,
-            export_name=mng.export_techname,
+            tech=mng.tech, gds_layers=mng.gds_layers, textgds_layers=mng.textgds_layers,
+            export_name=mng.pdk_name,
             prims_spiceparams=self._spice_params_cb(),
         )(layerprops=self._layerprops)
 
@@ -179,8 +179,7 @@ class _KlayoutGDSTask:
         out_dir = openpdk_tree.views_dir(lib_name=lib_name, view_name="gds")
         out_dir.mkdir(parents=True, exist_ok=True)
         layout = export2db(
-            lib, gds_layers=mng.gds_layers, cell_name=None, merge=False,
-            add_pin_label=True,
+            lib, gds_layers=mng.gds_layers, merge=False, add_pin_label=True,
         )
         layout.write(str(out_dir.joinpath(f"{lib_name}.gds")))
         for cell in layout.each_cell():
@@ -374,23 +373,23 @@ KLayoutLVSTaskT = _KLayoutLVSTask
 class TaskManager(_PDKMasterTaskManager):
     def __init__(self, *,
         tech_cb: Callable[[], _tch.Technology],
-        export_techname: Optional[str]=None,
         lib4name_cb: Callable[[str], _lbry.Library],
         cell_list: Dict[str, Collection[str]],
         top_dir: Path, openpdk_tree: OpenPDKTree,
         gdslayers_cb: Callable[[], GDSLayerSpecDict],
+        textgdslayers_cb: Callable[[], GDSLayerSpecDict]=(lambda: {}),
         task_name_drc: str="drc", task_name_lvs: str="lvs",
     ) -> None:
         super().__init__(
-            tech_cb=tech_cb, export_techname=export_techname,
-            lib4name_cb=lib4name_cb, cell_list=cell_list,
+            tech_cb=tech_cb, lib4name_cb=lib4name_cb, cell_list=cell_list,
             top_dir=top_dir, openpdk_tree=openpdk_tree,
         )
         self._gdslayer_cb = gdslayers_cb
+        self._textgdslayer_cb = textgdslayers_cb
         self._task_name_drc = task_name_drc
         self._task_name_lvs = task_name_lvs
         klayout_dir = openpdk_tree.tool_dir(tool_name="klayout")
-        self._tech_dir = tech_dir = klayout_dir.joinpath("tech", self.export_techname)
+        self._tech_dir = tech_dir = klayout_dir.joinpath("tech", self.pdk_name)
         self._drc_dir = tech_dir.joinpath("drc")
         self._lvs_dir = tech_dir.joinpath("lvs")
         self._share_dir = klayout_dir.joinpath("share")
@@ -402,10 +401,13 @@ class TaskManager(_PDKMasterTaskManager):
     @property
     def gds_layers(self) -> GDSLayerSpecDict:
         return self._gdslayer_cb()
+    @property
+    def textgds_layers(self) -> GDSLayerSpecDict:
+        return self._textgdslayer_cb()
 
     @property
     def lyt_file(self) -> Path:
-        return self._tech_dir.joinpath(f"{self.export_techname}.lyt")
+        return self._tech_dir.joinpath(f"{self.pdk_name}.lyt")
     @property
     def drc_lydrc_file(self) -> Path:
         return self._drc_dir.joinpath("DRC.lydrc")
@@ -414,22 +416,22 @@ class TaskManager(_PDKMasterTaskManager):
         return self._lvs_dir.joinpath("Extract.lylvs")
     @property
     def drc_file(self) -> Path:
-        return self._share_dir.joinpath(f"{self.export_techname}.drc")
+        return self._share_dir.joinpath(f"{self.pdk_name}.drc")
     @property
     def drc_script(self) -> Path:
-        return self._bin_dir.joinpath(f"drc_{self.export_techname}")
+        return self._bin_dir.joinpath(f"drc_{self.pdk_name}")
     @property
     def extract_file(self) -> Path:
-        return self._share_dir.joinpath(f"{self.export_techname}_extract.lvs")
+        return self._share_dir.joinpath(f"{self.pdk_name}_extract.lvs")
     @property
     def extract_script(self) -> Path:
-        return self._bin_dir.joinpath(f"extract_{self.export_techname}")
+        return self._bin_dir.joinpath(f"extract_{self.pdk_name}")
     @property
     def lvs_file(self) -> Path:
-        return self._share_dir.joinpath(f"{self.export_techname}.lvs")
+        return self._share_dir.joinpath(f"{self.pdk_name}.lvs")
     @property
     def lvs_script(self) -> Path:
-        return self._bin_dir.joinpath(f"lvs_{self.export_techname}")
+        return self._bin_dir.joinpath(f"lvs_{self.pdk_name}")
 
     @property
     def out_dir_drc(self) -> Path:

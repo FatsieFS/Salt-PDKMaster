@@ -7,7 +7,7 @@ from typing import Set, Tuple, Iterable, Optional, Callable, cast, overload
 from ... import dispatch as _dsp
 from ...typing  import GDSLayerSpecDict
 from ...technology import (
-    mask as _msk, net as _net, primitive as _prm, geometry as _geo, technology_ as _tch,
+    mask as _msk, primitive as _prm, geometry as _geo, technology_ as _tch,
 )
 from ...design import cell as _cell, routinggauge as _rg, library as _lbry
 from ...design.layout import layout_ as _laylay
@@ -30,7 +30,7 @@ class CoriolisExportSpec:
         self._net_direction_cb = net_direction_cb
 
     @property
-    def globalnets(self) -> Tuple[str]:
+    def globalnets(self) -> Tuple[str, ...]:
         return self._globalnets
     @property
     def net_direction_cb(self) -> Optional[Callable[[str], str]]:
@@ -694,13 +694,14 @@ class _LibraryGenerator:
 
             depth += 1
 
+        vpitch = round(lib.row_height/10, 3)
         s += dedent(f"""
             af.addRoutingGauge(rg)
             af.setRoutingGauge('{lib.name}')
 
             cg = CRL.CellGauge.create(
                 '{lib.name}', '{self.metals[1].name}',
-                u({lib.pingrid_pitch}), u({lib.row_height}), u({lib.pingrid_pitch}),
+                u({vpitch}), u({lib.row_height}), u({lib.pingrid_pitch}),
             )
             af.addCellGauge(cg)
             af.setCellGauge('{lib.name}')
@@ -753,23 +754,23 @@ class _LibraryGenerator:
                 cfg.anabatic.saturateRatio = 0.90
                 cfg.anabatic.saturateRp = 10
                 cfg.anabatic.topRoutingLayer = '{topmetal.name}'
-                cfg.anabatic.edgeLength = 48
-                cfg.anabatic.edgeWidth = 8
+                cfg.anabatic.edgeLength = 24
+                cfg.anabatic.edgeWidth = 4
                 cfg.anabatic.edgeCostH = 9.0
                 cfg.anabatic.edgeCostK = -10.0
                 cfg.anabatic.edgeHInc = 1.0
                 cfg.anabatic.edgeHScaling = 1.0
-                cfg.anabatic.globalIterations = 10
+                cfg.anabatic.globalIterations = 20
                 cfg.anabatic.globalIterations = [ 1, 100 ]
                 cfg.anabatic.gcell.displayMode = 1
                 cfg.anabatic.gcell.displayMode = (("Boundary", 1), ("Density", 2))
                 cfg.anabatic.searchHalo = 2
                 cfg.katana.trackFill = 0
                 cfg.katana.runRealignStage = True
-                cfg.katana.hTracksReservedMin   = 10
+                cfg.katana.hTracksReservedMin   = 4
                 cfg.katana.hTracksReservedLocal = 20
                 cfg.katana.hTracksReservedLocal = [0, 30]
-                cfg.katana.vTracksReservedMin   = 8
+                cfg.katana.vTracksReservedMin   = 4
                 cfg.katana.vTracksReservedLocal = 20
                 cfg.katana.vTracksReservedLocal = [0, 30]
                 cfg.katana.termSatReservedLocal = 8

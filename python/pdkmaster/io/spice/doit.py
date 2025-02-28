@@ -80,7 +80,6 @@ SPICEExportTaskT = _SPICEExportTask
 class TaskManager(_PDKMasterTaskManager):
     def __init__(self, *,
         tech_cb: Callable[[], _tch.Technology],
-        export_techname: Optional[str]=None,
         lib4name_cb: Callable[[str], _lbry.Library],
         cell_list: Dict[str, Collection[str]],
         top_dir: Path,
@@ -88,8 +87,7 @@ class TaskManager(_PDKMasterTaskManager):
         netlistfab_cb: Callable[[], SpiceNetlistFactory],
     ) -> None:
         super().__init__(
-            tech_cb=tech_cb, export_techname=export_techname,
-            lib4name_cb=lib4name_cb, cell_list=cell_list,
+            tech_cb=tech_cb, lib4name_cb=lib4name_cb, cell_list=cell_list,
             top_dir=top_dir, openpdk_tree=openpdk_tree,
         )
         self._netlistfab_cb = netlistfab_cb

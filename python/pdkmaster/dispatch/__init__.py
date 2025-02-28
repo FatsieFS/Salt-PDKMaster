@@ -4,7 +4,7 @@
 to allow to execute code specific to a certain object type but also allow to
 have common code for all subclasses of a common parent class.
 
-For each type of base class there is a sepearate \*Dispatched class that are based
+For each type of base class there is a sepearate \\*Dispatched class that are based
 on the same principle.
 If one wants to implement some code for a class, typically one subclasses the
 corresponding dispatcher class and then overloads one of the methods to implement

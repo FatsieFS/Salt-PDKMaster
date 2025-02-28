@@ -300,11 +300,11 @@ class _Layout:
     """
     def __init__(self, *,
         fab: "LayoutFactory",
-        sublayouts: _SubLayouts, boundary: Optional[_geo._Rectangular]=None,
+        sublayouts: _SubLayouts, boundary: Optional[_geo.RectangularT]=None,
     ):
         self.fab = fab
         self._sublayouts = sublayouts
-        self.boundary = boundary
+        self.boundary: Optional[_geo.RectangularT] = boundary
 
     @property
     def polygons(self) -> Iterable[_geo.MaskShape]:

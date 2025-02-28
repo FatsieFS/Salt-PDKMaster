@@ -66,6 +66,9 @@ class OpenPDKTree():
     def top(self) -> Path:
         return self._top
     @property
+    def pdk_dir(self) -> Path:
+        return self.top.joinpath(self.pdk_name)
+    @property
     def pdk_name(self) -> str:
         return self._pdk_name
 
@@ -93,7 +96,6 @@ class TaskManager(abc.ABC):
     @abc.abstractmethod
     def __init__(self, *,
         tech_cb: Callable[[], _tch.Technology],
-        export_techname: Optional[str],
         lib4name_cb: Callable[[str], _lbry.Library],
         cell_list: Dict[str, Collection[str]],
         top_dir: Path, openpdk_tree: OpenPDKTree,
@@ -101,7 +103,6 @@ class TaskManager(abc.ABC):
         # We work with callback functions so that technology does not need to be
         # generated as task creation time and only at
         self._tech_cb = tech_cb
-        self._export_techname = export_techname
         self._lib4name_cb = lib4name_cb
         self._cell_list = cell_list
         self._top_dir = top_dir
@@ -111,9 +112,8 @@ class TaskManager(abc.ABC):
     def tech(self) -> _tch.Technology:
         return self._tech_cb()
     @property
-    def export_techname(self) -> str:
-        name = self._export_techname
-        return name if name is not None else self.tech.name
+    def pdk_name(self) -> str:
+        return self._openpdk_tree.pdk_name
     @property
     def cell_list(self) -> Dict[str, Collection[str]]:
         return self._cell_list

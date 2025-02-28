@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later OR GPL-2.0-or-later OR CERN-OHL-S-2.0+ OR Apache-2.0
-from math import floor, ceil
 import abc
 from typing import List, Dict, Optional, Union, Iterable, cast, overload
 
@@ -407,23 +406,7 @@ class Technology(abc.ABC):
                 x=self.on_grid(dim.x, mult=mult, rounding=rounding),
                 y=self.on_grid(dim.y, mult=mult, rounding=rounding),
             )
-        if rounding == "floor":
-            dim += _geo.epsilon
-        elif rounding == "ceiling":
-            dim -= _geo.epsilon
-        else:
-            if rounding != "nearest":
-                raise ValueError(
-                    "rounding has to be one of ('floor', 'nearest', 'ceiling') "
-                    f"not '{rounding}'"
-                )
-        flookup = {"nearest": round, "floor": floor, "ceiling": ceil}
-        try:
-            f = flookup[rounding]
-        except KeyError: # pragma: no cover
-            raise RuntimeError(f"Not implemeted: rounding '{rounding}'")
-
-        return f(dim/(mult*self.grid))*mult*self.grid
+        return _geo.coord_on_grid(coord=dim, grid=mult*self.grid, rounding=rounding)
 
     @property
     def base(self) -> "_prm.Base":
@@ -444,6 +427,18 @@ class Technology(abc.ABC):
             return 1e-4
         else:
             return 1e-3
+
+    def gridunit(self, dim: float) -> int:
+        """Returns number of grid units for given dimension.
+
+        This converts dimension into integer value which is easier to compare
+        with other values.
+
+        The method will raise an exception if the dimension is not on grid.
+        """
+        if ((dim + _geo.epsilon)%self.grid) > 2*_geo.epsilon:
+            raise ValueError(f"dim '{dim}' is not on grid")
+        return round((dim + _geo.epsilon)//self.grid)
 
     def _build_interconnect(self) -> None:
         prims = self._primitives
@@ -614,6 +609,7 @@ class Technology(abc.ABC):
         for padopening in padopenings:
             add_prims(allwires(padopening.bottom))
         add_prims(padopenings)
+        add_prims((padopening.pin for padopening in padopenings if hasattr(padopening, "pin")))
 
         # process top metal wires
         add_prims(prims.__iter_type__(_prm.TopMetalWire))

@@ -145,7 +145,7 @@ class _CircuitLayouter: # pragma: no cover
             raise AssertionError("Internal error")
 
     def wire_layout(self, *,
-        net: _ckt._CircuitNet, wire: _prm.PrimitiveT, **wire_params,
+        net: _ckt.CircuitNetT, wire: _prm.ConductorT, **wire_params,
     ) -> LayoutT:
         if net not in self.circuit.nets:
             raise ValueError(
@@ -321,14 +321,14 @@ class _CircuitLayouter: # pragma: no cover
         return layout
 
     @overload
-    def place(self, object_: _ckt._Instance, *,
+    def place(self, object_: _ckt.InstanceT, *,
         origin: _geo.Point, x: None=None, y: None=None,
         layoutname: Optional[str]=None, rotation: _geo.Rotation=_geo.Rotation.R0,
         **layout_params: Any,
     ) -> LayoutT:
         ...
     @overload
-    def place(self, object_: _ckt._Instance, *,
+    def place(self, object_: _ckt.InstanceT, *,
         origin: None=None, x: float=0.0, y: float=0.0,
         layoutname: Optional[str]=None, rotation: _geo.Rotation=_geo.Rotation.R0,
         **layout_params: Any,
@@ -483,6 +483,18 @@ class _CircuitLayouter: # pragma: no cover
         has_rows = "rows" in via_params
         has_columns = "columns" in via_params
 
+        def pop_viabottom(name: str, keep: bool=False):
+            if keep:
+                param = via_params.get(name, None)
+            else:
+                param = via_params.pop(name, None)
+            return cast(_prm.ViaBottom, param)
+        def pop_enclosure(name: str, keep: bool=False):
+            if keep:
+                param = via_params.get(name, None)
+            else:
+                param = via_params.pop(name, None)
+            return cast(Union[str, float, _prp.Enclosure], param)
         def pop_param(name: str, type_: type, *, keep: bool=False):
             if keep:
                 param = via_params.get(name, None)
@@ -523,15 +535,13 @@ class _CircuitLayouter: # pragma: no cover
         if bottom_extra is None:
             bottom_extra = ()
 
-        bottom = pop_param("bottom", _prm.ViaBottom, keep=True)
+        bottom = pop_viabottom("bottom", keep=True)
         if bottom is None:
             bottom = via.bottom[0]
         assert not isinstance(bottom, _prm.Resistor), "Unimplemented"
 
-        bottom_enc = pop_param(
-            "bottom_enclosure", Union[str, float, _prp.Enclosure], keep=True,
-        )
-        if isinstance(bottom_enc, float):
+        bottom_enc = pop_enclosure("bottom_enclosure", keep=True)
+        if isinstance(bottom_enc, (int, float)):
             bottom_enc = _prp.Enclosure(bottom_enc)
         if (bottom_enc is None) or isinstance(bottom_enc, str):
             idx = via.bottom.index(bottom)
@@ -547,7 +557,7 @@ class _CircuitLayouter: # pragma: no cover
         bottom_venc = bottom_enc.second
 
         # Get bottom paramter specification
-        top = pop_param("top", _prm.ViaBottom, keep=True)
+        top = pop_viabottom("top", keep=True)
         if top is None:
             top = via.top[0]
         assert not isinstance(top, _prm.Resistor), "Unimplemented"
@@ -584,10 +594,8 @@ class _CircuitLayouter: # pragma: no cover
         if top_extra is None:
             top_extra = ()
 
-        top_enc = pop_param(
-            "top_enclosure", Union[str, float, _prp.Enclosure], keep=True,
-        )
-        if isinstance(top_enc, float):
+        top_enc = pop_enclosure("top_enclosure", keep=True)
+        if isinstance(top_enc, (int, float)):
             top_enc = _prp.Enclosure(top_enc)
         if (top_enc is None) or isinstance(top_enc, str):
             idx = via.top.index(top)
