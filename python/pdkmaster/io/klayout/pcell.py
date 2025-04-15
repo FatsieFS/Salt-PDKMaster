@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later OR GPL-2.0-or-later OR CERN-OHL-S-2.0+ OR Apache-2.0
 from itertools import product
-from typing import List, Tuple, Dict, Optional, Any, cast
+from types import MappingProxyType
+from typing import List, Mapping, Tuple, Dict, Optional, Any, cast
 import pya
 
 from pdkmaster import typing as _typ
@@ -184,7 +185,6 @@ class _ViaArray(pya.PCellDeclarationHelper):
         self._layoutfab = layoutfab
         self._gds_layers = gds_layers
         self._via = via
-        self._vals = vals = {}
         super().__init__()
 
         self.param("_enct", _TypeInt, "Sizing", default=0, choices=(
@@ -199,7 +199,6 @@ class _ViaArray(pya.PCellDeclarationHelper):
 
         enc_choices = (("Wide", 0), ("Tall", 1))
 
-        vals["n_diff"] = None
         choices = tuple((b.name, n) for n, b in enumerate(via.bottom))
         self.param("_b", _TypeInt, "Bottom", default=0, choices=choices, hidden=(len(via.bottom) == 1))
         self._b: Any
@@ -221,13 +220,13 @@ class _ViaArray(pya.PCellDeclarationHelper):
         self._benc: Any
         self._benc_h: Any
         self._benc_v: Any
-        vals["benc"] = enc
 
+        self._diff: Any = None
         diffs = tuple(p for p in via.bottom if isinstance(p, _prm.WaferWire))
         if diffs:
             assert len(diffs) == 1
             diff = diffs[0]
-            vals["n_diff"] = via.bottom.index(diff)
+            self._diff = diff
             choices = tuple(
                 (im.name, n)
                 for n, im in enumerate(diff.implant)
@@ -235,7 +234,7 @@ class _ViaArray(pya.PCellDeclarationHelper):
             )
             self.param(
                 "_im", _TypeInt, "Bottom implant", default=0, choices=choices,
-                hidden=(vals["n_diff"] != 0),
+                hidden=(via.bottom.index(diff) != 0),
             )
 
             enc = diff.min_implant_enclosure[0]
@@ -253,7 +252,6 @@ class _ViaArray(pya.PCellDeclarationHelper):
                 "_imenc_v", _TypeDouble, "Impl. ver. enclosure", unit="µm",
                 default=enc.second, hidden=True,
             )
-            vals["imenc"] = enc
         else:
             self.param(
                 "_im", _TypeInt, "Bottom implant", default=0, hidden=True,
@@ -297,7 +295,6 @@ class _ViaArray(pya.PCellDeclarationHelper):
         self._tenc: Any
         self._tenc_h: Any
         self._tenc_v: Any
-        vals["tenc"] = enc
 
         benc = via.min_bottom_enclosure[0].max()
         tenc = via.min_top_enclosure[0].max()
@@ -318,6 +315,55 @@ class _ViaArray(pya.PCellDeclarationHelper):
             "_space", _TypeDouble, "Space", unit="µm", default=via.min_space, hidden=True,
         )
         self._space: Any
+
+    @property
+    def _vals(self) -> Mapping[str, Any]:
+        via = self._via
+        b: int = self._b
+        t: int = self._t
+        enct = self._enct
+
+        vals = {}
+
+        n_diff = via.bottom.index(self._diff) if self._diff else None
+        vals["n_diff"] = n_diff
+
+        if (enct == 0):
+            be: int = self._benc
+            enc = via.min_bottom_enclosure[b]
+
+            vals["benc"] = enc.wide() if be == 0 else enc.tall()
+        elif (enct == 1):
+            be_h = self._benc_h
+            be_v = self._benc_v
+
+            vals["benc"] = _prp.Enclosure((be_h, be_v))
+
+        if n_diff == b:
+            if (enct == 0):
+                imenc = self._imenc
+                im = self._im
+                enc = via.bottom[n_diff].min_implant_enclosure[im]
+
+                vals["imenc"] = enc.wide() if imenc == 0 else enc.tall()
+            elif (enct == 1):
+                imenc_h = self._imenc_h
+                imenc_v = self._imenc_v
+
+                vals["imenc"] = _prp.Enclosure((imenc_h, imenc_v))
+
+        if (enct == 0):
+            te: int = self._tenc
+            enc = via.min_top_enclosure[t]
+
+            vals["tenc"] = enc.wide() if te == 0 else enc.tall()
+        elif (enct == 1):
+            te_h = self._tenc_h
+            te_v = self._tenc_v
+
+            vals["tenc"] = _prp.Enclosure((te_h, te_v))
+
+        return MappingProxyType(vals)
 
     def display_text_impl(self):
         via = self._via
@@ -399,15 +445,7 @@ class _ViaArray(pya.PCellDeclarationHelper):
 
         if name in ("", "_enct", "_b", "_benc", "_benc_h", "_benc_v"):
             if (enct == 0):
-                be: int = self._benc.value
                 enc = via.min_bottom_enclosure[b]
-
-                vals["benc"] = enc.wide() if be == 0 else enc.tall()
-            elif (enct == 1):
-                be_h = self._benc_h.value
-                be_v = self._benc_v.value
-
-                vals["benc"] = _prp.Enclosure((be_h, be_v))
 
         if n_diff is not None:
             if name in ("", "_b"):
@@ -427,15 +465,7 @@ class _ViaArray(pya.PCellDeclarationHelper):
 
                 if n_diff == b:
                     if (enct == 0):
-                        imenc = self._imenc.value
                         enc = via.bottom[n_diff].min_implant_enclosure[im]
-
-                        vals["imenc"] = enc.wide() if imenc == 0 else enc.tall()
-                    elif (enct == 1):
-                        imenc_h = self._imenc_h.value
-                        imenc_v = self._imenc_v.value
-
-                        vals["imenc"] = _prp.Enclosure((imenc_h, imenc_v))
 
         if name in ("", "_t"):
             enc = via.min_top_enclosure[t]
@@ -445,15 +475,7 @@ class _ViaArray(pya.PCellDeclarationHelper):
 
         if name in ("", "_tenc", "_tenc_h", "_tenc_v"):
             if (enct == 0):
-                te: int = self._tenc.value
                 enc = via.min_top_enclosure[t]
-
-                vals["tenc"] = enc.wide() if te == 0 else enc.tall()
-            elif (enct == 1):
-                te_h = self._tenc_h.value
-                te_v = self._tenc_v.value
-
-                vals["tenc"] = _prp.Enclosure((te_h, te_v))
 
         if name in ("", "_mins"):
             self._space.visible = not self._mins.value
